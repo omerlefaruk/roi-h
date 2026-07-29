@@ -1,0 +1,138 @@
+[build-system]
+requires = ["hatchling==1.31.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "roi-h"
+version = "0.1.0"
+description = "A durable ActiveGraph-based RPA automation core."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { file = "LICENSE" }
+authors = [{ name = "ROI-H maintainers" }]
+dependencies = [
+  "activegraph==1.10.0",
+  "openpyxl>=3.1.5",
+  "playwright>=1.61.0",
+  "pydantic==2.13.4",
+  "pyyaml>=6.0.3",
+]
+
+[project.scripts]
+roi-h = "roi_h.cli:main"
+
+[dependency-groups]
+dev = [
+  "build==1.5.0",
+  "mypy==2.3.0",
+  "pytest==9.1.1",
+  "pytest-cov==7.1.0",
+  "ruff==0.16.0",
+  "twine==7.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/roi_h"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"skills" = "roi_h/_skills"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/LICENSE",
+  "/README.md",
+  "/pyproject.toml",
+  "/src/roi_h",
+  "/skills",
+]
+exclude = [
+  "/.gitignore",
+  "/analysis",
+  "/artifacts",
+  "/automations",
+  "/customer",
+  "/private",
+  "/projects",
+  "/tests",
+]
+
+[tool.pytest.ini_options]
+addopts = ["--strict-config", "--strict-markers", "-ra"]
+testpaths = ["tests"]
+markers = [
+  "external: requires external infrastructure",
+  "optional: qualifies an optional adapter",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [
+  "build",
+  "skills",
+]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+  "CPY001",
+  "COM812",
+  "D203",
+  "D213",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"src/roi_h/harness/*.py" = [
+  "TC001",
+  "TC002",
+  "TC003",
+  "PLR0913",
+  "PLR0912",
+  "PLR0911",
+  "PLR0915",
+  "PLR2004",
+  "FBT001",
+  "D102",
+  "D103",
+  "ANN401",
+  "C901",
+  "PERF401",
+  "PIE810",
+  "SIM108",
+]
+"src/roi_h/cli.py" = ["TC001", "TC003", "PLR0913", "PLR0915", "F401"]
+"skills/**/*.py" = ["D", "INP001"]
+"tests/**/*.py" = [
+  "ANN",
+  "ARG002",
+  "C901",
+  "D",
+  "E501",
+  "FBT",
+  "PLC0415",
+  "PLR2004",
+  "PT018",
+  "RUF100",
+  "S101",
+  "SLF001",
+  "TC",
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["roi_h"]
+mypy_path = "src"
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = ["activegraph", "activegraph.*"]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+branch = true
+source = ["roi_h"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

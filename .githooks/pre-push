@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+repository_root=$(git rev-parse --show-toplevel)
+python3 "$repository_root/scripts/check_publication_boundary.py" --history

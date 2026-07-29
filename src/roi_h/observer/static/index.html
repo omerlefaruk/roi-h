@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <title>ROI-H Observer</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand" aria-label="ROI-H">ROI-H</div>
+      <label class="select-shell">
+        <span class="sr-only">Project</span>
+        <select id="project-filter" aria-label="Filter by project">
+          <option value="">All projects</option>
+        </select>
+      </label>
+      <label class="select-shell environment-select">
+        <span class="sr-only">Environment</span>
+        <select id="environment-filter" aria-label="Filter by environment">
+          <option value="">DEV + PROD</option>
+          <option value="dev">DEV</option>
+          <option value="prod">PROD</option>
+        </select>
+      </label>
+      <label class="search-shell">
+        <img src="/icons/search-line.svg" alt="" />
+        <input id="run-search" type="search" placeholder="Search runs..." autocomplete="off" />
+      </label>
+      <div class="read-only-badge">READ ONLY</div>
+    </header>
+
+    <main id="workspace" class="workspace">
+      <aside class="run-panel" aria-label="Runs">
+        <div class="run-panel-header">
+          <h1>Runs</h1>
+          <label class="attention-control">
+            <span>Needs attention</span>
+            <input id="attention-filter" type="checkbox" role="switch" />
+          </label>
+        </div>
+        <div id="run-list" class="run-list" aria-live="polite"></div>
+        <div id="run-count" class="run-count"></div>
+      </aside>
+
+      <section id="run-detail" class="run-detail" aria-live="polite">
+        <div class="empty-state">
+          <h2>Select a run</h2>
+          <p>Choose a run on the left to read what happened.</p>
+        </div>
+      </section>
+
+      <aside id="artifact-drawer" class="artifact-drawer" aria-label="Artifact preview" hidden>
+        <div class="drawer-header">
+          <div class="drawer-title-wrap">
+            <img id="drawer-file-icon" class="drawer-file-icon" src="/icons/file-text-line.svg" alt="" />
+            <h2 id="drawer-title">Artifact</h2>
+          </div>
+          <button id="drawer-close" class="icon-button" type="button" aria-label="Close preview">
+            <img src="/icons/close-line.svg" alt="" />
+          </button>
+        </div>
+        <div class="preview-only-badge">PREVIEW ONLY</div>
+        <div id="artifact-preview" class="artifact-preview"></div>
+        <div id="artifact-provenance" class="artifact-provenance"></div>
+        <details class="file-details">
+          <summary>
+            <span>More file details</span>
+            <img src="/icons/arrow-down-s-line.svg" alt="" />
+          </summary>
+          <div id="file-details-body" class="file-details-body"></div>
+        </details>
+        <a id="artifact-download" class="download-button" href="#" download>
+          <img src="/icons/download-line.svg" alt="" />
+          <span>Download original</span>
+        </a>
+      </aside>
+    </main>
+
+    <div id="toast" class="toast" role="status" hidden></div>
+    <script src="/app.js"></script>
+  </body>
+</html>

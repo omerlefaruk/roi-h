@@ -1,0 +1,41 @@
+.DS_Store
+.coverage
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# ROI-H runtime and operator-owned state belongs under ~/.roi-h, never Git.
+.roi-h/
+.roi-h-*/
+
+# Private/customer work must live under ~/.roi-h/projects or ~/.roi-h/private.
+/analysis/
+/artifacts/
+/automations/
+/customer/
+/private/
+/projects/
+/custom-skills/
+/CONTEXT.md
+/challenge.xlsx
+/.design-qa-*.jpg
+/design-qa.md
+/docs/DAILY_SUMMARY_HANDOFF.md
+/docs/daily-summary-*
+/docs/extracted-daily-summary-automation.json
+/docs/extracted-scripts/
+/docs/trendyol-satis-raporu-steps.*
+/skills/ata/
+/src/roi_h/ata/
+/tests/fixtures/daily_summary/
+/tests/integration/test_rpa_challenge_codex.py
+/tests/unit/test_ata_analysis.py
+/tests/unit/test_daily_summary_*.py
+
+# Development and build state.
+.venv/
+__pycache__/
+build/
+dist/
+*.egg-info/
+*.py[cod]
