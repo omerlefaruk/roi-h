@@ -127,18 +127,110 @@ def project_import_verify(request: CommandRequest) -> dict[str, Any]:
 
 
 def project_import(request: CommandRequest) -> dict[str, Any]:
+    home = resolve_home(request.arguments.get("home"))
+    plan_id = _optional_string(request, "plan_id")
+    if plan_id is not None:
+        return _project_import_replace_apply(home, plan_id)
+    source = Path(_required_string(request, "source")).expanduser().resolve()
+    inspection = ProjectArchive().inspect(source)
+    name = _optional_string(request, "name") or inspection.slug
+    target = home / "projects" / name
+    if target.is_dir():
+        return _project_import_replace_plan(home, source, name, target)
     result = (
         ProjectArchive()
         .import_archive(
-            _required_string(request, "source"),
-            resolve_home(request.arguments.get("home")),
-            name=_optional_string(request, "name"),
+            source,
+            home,
+            name=name,
             use=request.arguments.get("use") is True,
         )
         .to_dict()
     )
     result.pop("path", None)
     return _safe(result)
+
+
+def _project_import_replace_plan(
+    home: Path,
+    source: Path,
+    name: str,
+    target: Path,
+) -> dict[str, Any]:
+    plan = DestructivePlan(
+        plan_id=f"plan_{uuid4().hex}",
+        operation="project.import.replace",
+        arguments={
+            "name": name,
+            "source": str(source),
+            "source_digest": _path_digest(source),
+        },
+        effects=[
+            {
+                "action": "replace_project",
+                "project": name,
+                "previous_project": "move_to_recoverable_trash",
+            }
+        ],
+        state_digest=_path_digest(target),
+        expires_at=datetime.now(UTC) + timedelta(minutes=30),
+        apply_operation="project.import",
+    )
+    atomic_write_json(
+        _home_plan_path(home, plan.plan_id),
+        plan.model_dump(mode="json"),
+        mode=0o600,
+    )
+    public = plan.model_dump(mode="json")
+    public["arguments"] = {
+        "name": name,
+        "source_digest": plan.arguments["source_digest"],
+    }
+    return public
+
+
+def _project_import_replace_apply(home: Path, plan_id: str) -> dict[str, Any]:
+    path = _home_plan_path(home, plan_id)
+    if not path.is_file():
+        msg = f"plan not found: {plan_id}"
+        raise FileNotFoundError(msg)
+    plan = DestructivePlan.model_validate_json(path.read_text(encoding="utf-8"))
+    if plan.apply_operation != "project.import":
+        _state_changed()
+    if plan.expires_at < datetime.now(UTC):
+        msg = "plan.expired: the plan expired"
+        raise RuntimeError(msg)
+    name = str(plan.arguments["name"])
+    source = Path(str(plan.arguments["source"]))
+    target = home / "projects" / name
+    if (
+        not target.is_dir()
+        or _path_digest(target) != plan.state_digest
+        or _path_digest(source) != plan.arguments["source_digest"]
+    ):
+        _state_changed()
+    trash = home / "trash" / "projects"
+    trash.mkdir(parents=True, exist_ok=True, mode=0o700)
+    previous = trash / f"{name}-{uuid4().hex}"
+    target.replace(previous)
+    try:
+        imported = ProjectArchive().import_archive(
+            source,
+            home,
+            name=name,
+            use=False,
+        ).to_dict()
+    except Exception:
+        if not target.exists():
+            previous.replace(target)
+        raise
+    path.unlink(missing_ok=True)
+    imported.pop("path", None)
+    return {
+        **_safe(imported),
+        "replaced": True,
+        "recoverable_previous_project": True,
+    }
 
 
 def project_rename(request: CommandRequest) -> dict[str, Any]:
@@ -718,6 +810,13 @@ def _plan_path(workspace: Workspace, plan_id: str) -> Path:
         msg = "invalid plan ID"
         raise ValueError(msg)
     return workspace.runtime / "agent-plans" / f"{plan_id}.json"
+
+
+def _home_plan_path(home: Path, plan_id: str) -> Path:
+    if not plan_id.startswith("plan_") or not plan_id.removeprefix("plan_").isalnum():
+        msg = "invalid plan ID"
+        raise ValueError(msg)
+    return home / "runtime" / "agent-plans" / f"{plan_id}.json"
 
 
 def _path_digest(path: Path) -> str:
