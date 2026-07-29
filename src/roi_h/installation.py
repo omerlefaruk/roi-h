@@ -119,6 +119,11 @@ def inspect_installation_health(
     skill_details = cast("dict[str, JsonValue]", dict(skill_presence))
     data_home_access = _inspect_data_home(data_home)
     managed_state, managed_details = _inspect_managed_install(install_root)
+    browser_check = _inspect_browser(
+        install_root,
+        managed_state,
+        managed_details,
+    )
     version_text = ".".join(str(part) for part in resolved_python_version)
 
     checks = (
@@ -166,12 +171,7 @@ def inspect_installation_health(
             message=_managed_install_message(managed_state),
             details=managed_details,
         ),
-        HealthCheck(
-            code="browser.launch",
-            status="pending",
-            message="The browser launch check is not configured in this doctor version.",
-            details={"reason": "not_configured"},
-        ),
+        browser_check,
     )
 
     return InstallationHealthReport(
@@ -243,6 +243,7 @@ def _inspect_managed_install(
         return "invalid", {"state": "invalid", "reason": "state_invalid"}
     schema_version = payload.get("schema_version")
     active_version = payload.get("active_version")
+    browser_revision = payload.get("browser_revision")
     if (
         schema_version != SCHEMA_VERSION
         or not isinstance(active_version, str)
@@ -253,7 +254,46 @@ def _inspect_managed_install(
         "state": "managed",
         "schema_version": schema_version,
         "active_version": active_version,
+        "browser_revision": (
+            browser_revision if isinstance(browser_revision, str) and browser_revision else None
+        ),
     }
+
+
+def _inspect_browser(
+    install_root: Path,
+    managed_state: ManagedInstallState,
+    managed_details: dict[str, JsonValue],
+) -> HealthCheck:
+    if managed_state != "managed":
+        return HealthCheck(
+            code="browser.launch",
+            status="pending",
+            message="The browser check requires a managed installation.",
+            details={"reason": "not_managed"},
+        )
+    revision = managed_details.get("browser_revision")
+    if not isinstance(revision, str):
+        return HealthCheck(
+            code="browser.launch",
+            status="fail",
+            message="The managed installation has no browser revision.",
+            details={"reason": "revision_not_recorded"},
+        )
+    revision_root = install_root / "browsers" / revision
+    if not revision_root.is_dir():
+        return HealthCheck(
+            code="browser.launch",
+            status="fail",
+            message="The required browser revision is not installed.",
+            details={"reason": "revision_missing", "revision": revision},
+        )
+    return HealthCheck(
+        code="browser.launch",
+        status="pass",
+        message="The required browser revision is installed.",
+        details={"revision": revision},
+    )
 
 
 def _data_home_message(access: DataHomeAccess) -> str:

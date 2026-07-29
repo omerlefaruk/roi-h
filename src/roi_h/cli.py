@@ -5,8 +5,10 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import os
 import re
 import shutil
+import subprocess
 import sys
 import time
 from collections.abc import Sequence
@@ -90,6 +92,57 @@ def _cmd_doctor(args: argparse.Namespace) -> dict[str, Any]:
     return payload
 
 
+def _cmd_update(args: argparse.Namespace) -> dict[str, Any]:
+    install_root = Path(args.install_root).expanduser().resolve()
+    data_home = resolve_home(args.home)
+    helper_name = "update.ps1" if os.name == "nt" else "update.sh"
+    helper = install_root / "installer" / helper_name
+    if not helper.is_file():
+        msg = (
+            "This installation does not have the external updater helper. "
+            "Run the one-line installer again."
+        )
+        raise RuntimeError(msg)
+    command = (
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(helper),
+        ]
+        if os.name == "nt"
+        else [str(helper)]
+    )
+    environment = os.environ.copy()
+    environment["ROI_H_INSTALL_ROOT"] = str(install_root)
+    environment["ROI_H_HOME"] = str(data_home)
+    completed = subprocess.run(  # noqa: S603
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        raise RuntimeError(detail or "The external updater helper failed.")
+    output_lines = [line for line in completed.stdout.splitlines() if line.strip()]
+    if not output_lines:
+        no_result = "The external updater helper returned no result."
+        raise RuntimeError(no_result)
+    try:
+        payload = json.loads(output_lines[-1])
+    except json.JSONDecodeError as exc:
+        invalid_result = "The external updater helper returned an invalid result."
+        raise RuntimeError(invalid_result) from exc
+    if not isinstance(payload, dict):
+        invalid_result = "The external updater helper returned an invalid result."
+        raise TypeError(invalid_result)
+    return cast("dict[str, Any]", payload)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Entry point for ``roi-h`` / ``python -m roi_h``."""
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
@@ -151,6 +204,11 @@ def _build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--home", default=None)
     doctor.add_argument("--output", choices=["json"], default="json")
     doctor.set_defaults(handler=_cmd_doctor)
+    update = sub.add_parser("update", help="Install the current stable ROI-H release")
+    update.add_argument("--install-root", default=str(default_install_root()))
+    update.add_argument("--home", default=None)
+    update.add_argument("--output", choices=["json"], default="json")
+    update.set_defaults(handler=_cmd_update)
     rpa = sub.add_parser("rpa", help="RPA harness commands")
     rpa_sub = rpa.add_subparsers(dest="rpa_command", required=True)
     observer_shortcut = sub.add_parser(

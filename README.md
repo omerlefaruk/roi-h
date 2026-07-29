@@ -106,3 +106,23 @@ tests, and a clean package build against every supported Python version. Release
 depend on GitHub Actions; see
 [`docs/distribution-and-updates.md`](docs/distribution-and-updates.md) for the local
 publish procedure and external automation options.
+
+Build one self-contained macOS ARM64 candidate from the locked Python 3.12 environment:
+
+```shell
+uv run python scripts/prepare_release_candidate.py \
+  --repository "$PWD" \
+  --output-dir /tmp/roi-h-candidate \
+  --version 0.1.0 \
+  --installer-version 0.1.0 \
+  --python-version 3.12.13 \
+  --browser-revision chromium-1228 \
+  --activegraph-version 1.10.0 \
+  --channel stable
+```
+
+The candidate contains the application wheel, the external installer wheel, every locked
+runtime wheel, and a digest-verified release description. The public one-line command is
+enabled only after this bundle and the reviewed bootstrap are uploaded to
+`get.roi-h.dev`. Re-running that command updates a managed installation; the installed
+equivalent is `roi-h update`.

@@ -1,7 +1,8 @@
 # ROI-H Distribution, Installation, and Updates
 
-**Status:** Accepted design; storage, publication seam, local release gate, and detailed
-implementation plan complete; installer pending
+**Status:** Local installer, managed update, bootstrap, and release-candidate tooling
+implemented; public hosting, signed channel metadata, and cross-platform qualification
+pending
 **Audience:** Release engineers and implementation agents
 **Last updated:** 2026-07-29
 
@@ -41,6 +42,11 @@ roi-h update
 
 Running the original installer again must also be idempotent and update an existing
 installation.
+
+The command above becomes a real consumer command only after the qualified `install.sh`
+and its immutable release bundle are uploaded to `get.roi-h.dev`. Before that
+publication, maintainers can qualify the same path with the repository script and an
+explicit staging bundle URL and SHA-256 digest.
 
 ROI-H will not use npm as its primary package or installation mechanism. An npm wrapper
 may be considered later only if there is a demonstrated JavaScript-user requirement. It
@@ -155,13 +161,19 @@ The installed application must provide:
 ```shell
 roi-h --version
 roi-h doctor
-roi-h update --check
+roi-h update
 ```
 
 `roi-h --version` must report the application version and may also report the release
 channel. `roi-h doctor` must validate the executable, Python runtime, built-in skills,
 workspace access, and Playwright browser compatibility without mutating user automation
 data.
+
+The first release implements `roi-h update` by handing control to a helper outside the
+active application environment. The helper downloads the current verified bootstrap,
+which stages and activates the replacement beside the running version. Signed channel
+metadata is still required before `roi-h update --check` and exact-version selection can
+be implemented safely.
 
 ### Update
 
@@ -420,18 +432,23 @@ dependencies, Playwright Chromium, and required Linux system libraries. Tag it w
 application version and publish its digest. Production documentation should recommend
 pinning the digest rather than relying on a mutable `latest` tag.
 
-## Required CLI work
+## Release CLI status
 
-Before the installer is advertised, ROI-H must implement:
+Implemented:
 
 - `roi-h --version`
 - `roi-h doctor`
 - `roi-h update`
-- `roi-h update --check`
-- `roi-h update --version <version>`
-- the internal Playwright setup/verification operation
+- the internal Playwright setup and verification operation
 - updater-helper handoff
 - stable installed-data-home resolution
+
+Required before exact-version update and rollback are advertised:
+
+- `roi-h update --check`
+- `roi-h update --version <version>`
+- signed channel metadata resolution
+- `roi-h rollback`
 
 `roi-h uninstall` may follow in the same release, but the standalone installer must
 already have a documented recoverable uninstall path.

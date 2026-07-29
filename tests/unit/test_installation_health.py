@@ -32,10 +32,17 @@ def test_inspect_reports_a_healthy_managed_install(tmp_path: Path) -> None:
     data_home.mkdir()
     _make_skills(skills_root)
     (install_root / "install-state.json").write_text(
-        json.dumps({"schema_version": 1, "active_version": "0.1.0"}),
+        json.dumps(
+            {
+                "schema_version": 1,
+                "active_version": "0.1.0",
+                "browser_revision": "chromium-1228",
+            }
+        ),
         encoding="utf-8",
     )
     (install_root / "current").write_text("versions/0.1.0\n", encoding="utf-8")
+    (install_root / "browsers" / "chromium-1228").mkdir(parents=True)
 
     report = inspect_installation_health(
         install_root=install_root,
@@ -61,7 +68,7 @@ def test_inspect_reports_a_healthy_managed_install(tmp_path: Path) -> None:
         "install.managed_state",
         "browser.launch",
     ]
-    assert _checks_by_code(report)["browser.launch"].status == "pending"
+    assert _checks_by_code(report)["browser.launch"].status == "pass"
 
 
 def test_inspect_does_not_create_a_missing_data_home(tmp_path: Path) -> None:
@@ -146,3 +153,41 @@ def test_report_dictionary_is_strict_and_json_serializable(tmp_path: Path) -> No
         set(check) == {"code", "status", "message", "details"} for check in payload["checks"]
     )
     assert json.loads(json.dumps(payload)) == payload
+
+
+def test_managed_install_fails_when_required_browser_is_missing(
+    tmp_path: Path,
+) -> None:
+    install_root = tmp_path / "install"
+    data_home = tmp_path / "data"
+    skills_root = tmp_path / "skills"
+    install_root.mkdir()
+    data_home.mkdir()
+    _make_skills(skills_root)
+    (install_root / "install-state.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "active_version": "0.1.0",
+                "browser_revision": "chromium-1228",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (install_root / "current").write_text("versions/0.1.0\n", encoding="utf-8")
+
+    report = inspect_installation_health(
+        install_root=install_root,
+        data_home=data_home,
+        application_version="0.1.0",
+        python_version=(3, 12, 13),
+        skills_root=skills_root,
+    )
+
+    browser = _checks_by_code(report)["browser.launch"]
+    assert report.healthy is False
+    assert browser.status == "fail"
+    assert browser.details == {
+        "reason": "revision_missing",
+        "revision": "chromium-1228",
+    }

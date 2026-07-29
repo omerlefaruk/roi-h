@@ -45,6 +45,7 @@ def _distribution_artifacts(
 def main() -> int:
     """Qualify the supported Python runtime and build release artifacts once."""
     _run([sys.executable, "scripts/check_publication_boundary.py"])
+    _run(["/bin/sh", "-n", "install.sh"])
     _run(["uv", "sync", "--locked", "--python", PYTHON_VERSION, "--group", "dev"])
     _run(
         [

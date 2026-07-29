@@ -60,6 +60,7 @@ class EffectKind(StrEnum):
 
     CREATE_INSTALL_ROOT = "create_install_root"
     CREATE_VERSION = "create_version"
+    INSTALL_BROWSER = "install_browser"
     INSTALL_LAUNCHER = "install_launcher"
     ACTIVATE_VERSION = "activate_version"
 
@@ -77,10 +78,19 @@ class ErrorCategory(StrEnum):
 class InstallerErrorCode(StrEnum):
     """Stable codes that callers use instead of English messages."""
 
+    INSTALL_NOT_MANAGED = "install.not_managed"
     INSTALL_OPERATION_NOT_SUPPORTED = "install.operation_not_supported"
     INSTALL_PATH_UNAVAILABLE = "install.path_unavailable"
+    PYTHON_INSTALL_FAILED = "python.install_failed"
+    ENVIRONMENT_CREATE_FAILED = "environment.create_failed"
+    DEPENDENCY_INSTALL_FAILED = "dependency.install_failed"
+    BROWSER_INSTALL_FAILED = "browser.install_failed"
+    DOCTOR_FAILED = "doctor.failed"
+    UPDATE_PLAN_STALE = "update.plan_stale"
+    UPDATE_ACTIVATION_FAILED = "update.activation_failed"
     RELEASE_METADATA_UNTRUSTED = "release.metadata_untrusted"
     RELEASE_CHANNEL_NOT_FOUND = "release.channel_not_found"
+    RELEASE_TARGET_VERIFICATION_FAILED = "release.target_verification_failed"
     RELEASE_VERSION_NOT_FOUND = "release.version_not_found"
 
 
@@ -130,8 +140,22 @@ class TrustedRelease(ContractModel):
         StringConstraints(pattern=r"^3\.12\.[0-9]+$", strict=True),
     ]
     browser_revision: str = Field(min_length=1)
+    application_target: str = Field(min_length=1)
+    installer_target: str | None = Field(default=None, min_length=1)
+    installer_version: Version | None = None
     data_compatibility: DataCompatibility
     targets: tuple[TrustedTarget, ...] = Field(min_length=1)
+
+    @field_validator("application_target", "installer_target")
+    @classmethod
+    def executable_target_is_logical(cls, value: str | None) -> str | None:
+        """Reject physical and traversing executable target names."""
+        if value is None:
+            return None
+        if value in {".", ".."} or "/" in value or "\\" in value:
+            msg = "Executable targets must be one logical path segment."
+            raise ValueError(msg)
+        return value
 
 
 class InstallRequest(ContractModel):
@@ -185,6 +209,7 @@ class InstallPlan(ContractModel):
     requested_version: Version
     selected_channel: str
     selected_release: TrustedRelease
+    release_description: Path
     requirements: tuple[PlanRequirement, ...]
     effects: tuple[PlanEffect, ...]
     recovery_steps: tuple[RecoveryStep, ...]
