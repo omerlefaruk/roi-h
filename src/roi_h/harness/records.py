@@ -171,11 +171,15 @@ class ArtifactRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    artifact_id: str
     run_id: str
     name: str
-    path: str
+    uri: str
     bytes: int
     sha256: str
+    media_type: str = "application/octet-stream"
+    source: str = ""
+    created_at: str | None = None
     phase: str | None = None
     phase_id: str | None = None
     seeded: bool = False

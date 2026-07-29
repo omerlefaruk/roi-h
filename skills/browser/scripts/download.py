@@ -6,6 +6,7 @@ TOOL_ID = "download"
 DESCRIPTION = "Click a download link/button and save the file; returns path."
 DETERMINISTIC = False
 REQUIRES_APPROVAL = False
+FILESYSTEM_ROOTS = ("run:work:read-write", "run:output:read-write", "run:tmp:read-write")
 class Input(BaseModel):
     text: str = Field(default="", description="Visible link/button text to click")
     ref: str = ""

@@ -3,6 +3,7 @@ import csv
 from pathlib import Path
 from pydantic import BaseModel
 TOOL_ID="write_rows"; DESCRIPTION="Write list of dicts to csv or xlsx."; DETERMINISTIC=True; REQUIRES_APPROVAL=False
+FILESYSTEM_ROOTS=("run:work:read-write","run:output:read-write","run:tmp:read-write")
 class Input(BaseModel):
     path: str
     rows: list[dict] = []

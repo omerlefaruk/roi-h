@@ -3,6 +3,7 @@ import shutil
 from pathlib import Path
 from pydantic import BaseModel
 TOOL_ID="copy"; DESCRIPTION="Copy a file."; DETERMINISTIC=True; REQUIRES_APPROVAL=False
+FILESYSTEM_ROOTS=("project:reference:read","run:input:read","run:work:read-write","run:output:read-write","run:tmp:read-write","artifact:read","automation:read")
 class Input(BaseModel):
     source: str
     dest: str

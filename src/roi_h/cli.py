@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -15,6 +16,7 @@ from activegraph.store.sqlite import SQLiteEventStore
 from roi_h.harness import RunSession
 from roi_h.harness.automation import list_automations
 from roi_h.harness.custom import define_project_tool
+from roi_h.harness.diagnostics import DiagnosticSink
 from roi_h.harness.domain import BudgetSpec
 from roi_h.harness.journeys import (
     new_run_id,
@@ -23,7 +25,12 @@ from roi_h.harness.journeys import (
     validate_run_id,
 )
 from roi_h.harness.loader import default_skills_root, load_skills, resolve_skills_root
+from roi_h.harness.logical_paths import LogicalPath, PathResolver, PathScope
+from roi_h.harness.project_archive import ProjectArchive
+from roi_h.harness.retention import RetentionPlanner
+from roi_h.harness.run_storage import RunStorage
 from roi_h.harness.secrets import delete_secret, list_secrets, set_secret
+from roi_h.harness.store_lifecycle import StoreLifecycle
 from roi_h.harness.workspace import (
     Workspace,
     create_project,
@@ -58,7 +65,12 @@ def _configure_ui_parser(parser: argparse.ArgumentParser) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     """Entry point for ``roi-h`` / ``python -m roi_h``."""
     parser = _build_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    if raw_argv[:4] == ["rpa", "run", "input", "add"]:
+        raw_argv = ["rpa", "input", "add", *raw_argv[4:]]
+    elif raw_argv[:3] == ["rpa", "run", "files"]:
+        raw_argv = ["rpa", "files", *raw_argv[3:]]
+    args = parser.parse_args(raw_argv)
     try:
         result = args.handler(args)
     except (
@@ -92,6 +104,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _configure_ui_parser(observer_shortcut)
 
+    diagnostics = sub.add_parser("diagnostics", help="Show bounded operational diagnostics")
+    diagnostics_sub = diagnostics.add_subparsers(
+        dest="diagnostics_command",
+        required=True,
+    )
+    for command in ("show", "tail"):
+        diagnostic_show = diagnostics_sub.add_parser(command)
+        diagnostic_show.add_argument("--home", default=None)
+        diagnostic_show.add_argument("--limit", type=int, default=100)
+        diagnostic_show.set_defaults(handler=_cmd_diagnostics_show)
+
     # project
     project = rpa_sub.add_parser("project", help="Create, list, and switch named projects")
     project_sub = project.add_subparsers(dest="project_command", required=True)
@@ -108,6 +131,15 @@ def _build_parser() -> argparse.ArgumentParser:
     project_show.add_argument("name", nargs="?", default=None)
     _add_workspace_options(project_show)
     project_show.set_defaults(handler=_cmd_project_show)
+
+    project_paths = project_sub.add_parser("paths", help="Show typed project paths")
+    _add_workspace_options(project_paths)
+    project_paths.set_defaults(handler=_cmd_project_paths)
+
+    project_doctor = project_sub.add_parser("doctor", help="Validate project storage")
+    _add_workspace_options(project_doctor)
+    project_doctor.add_argument("--full", action="store_true")
+    project_doctor.set_defaults(handler=_cmd_project_doctor)
 
     project_create = project_sub.add_parser("create", help="Create a named project")
     project_create.add_argument("name")
@@ -174,6 +206,21 @@ def _build_parser() -> argparse.ArgumentParser:
     project_rename.add_argument("--home", default=None)
     project_rename.set_defaults(handler=_cmd_project_rename)
 
+    project_export = project_sub.add_parser("export", help="Export a portable .roih archive")
+    project_export.add_argument("name")
+    project_export.add_argument("--output", required=True)
+    project_export.add_argument("--mode", choices=["definition", "full"], default="full")
+    project_export.add_argument("--home", default=None)
+    project_export.set_defaults(handler=_cmd_project_export)
+
+    project_import = project_sub.add_parser("import", help="Verify or import a .roih archive")
+    project_import.add_argument("source")
+    project_import.add_argument("--name", default=None)
+    project_import.add_argument("--verify-only", action="store_true")
+    project_import.add_argument("--use", action="store_true")
+    project_import.add_argument("--home", default=None)
+    project_import.set_defaults(handler=_cmd_project_import)
+
     # env
     env = rpa_sub.add_parser("env", help="Show or set active environment (dev|prod)")
     env_sub = env.add_subparsers(dest="env_command", required=True)
@@ -184,6 +231,31 @@ def _build_parser() -> argparse.ArgumentParser:
     env_set.add_argument("name", choices=["dev", "prod"])
     _add_workspace_options(env_set)
     env_set.set_defaults(handler=_cmd_env_set)
+
+    store = rpa_sub.add_parser("store", help="Inspect and maintain the ActiveGraph store")
+    store_sub = store.add_subparsers(dest="store_command", required=True)
+    store_status = store_sub.add_parser("status")
+    _add_workspace_options(store_status)
+    store_status.set_defaults(handler=_cmd_store_status)
+    store_check = store_sub.add_parser("check")
+    _add_workspace_options(store_check)
+    store_check.add_argument("--full", action="store_true")
+    store_check.set_defaults(handler=_cmd_store_check)
+    store_backup = store_sub.add_parser("backup")
+    _add_workspace_options(store_backup)
+    store_backup.add_argument("--output", required=True)
+    store_backup.set_defaults(handler=_cmd_store_backup)
+    store_restore = store_sub.add_parser("restore")
+    _add_workspace_options(store_restore)
+    store_restore.add_argument("source")
+    store_restore.set_defaults(handler=_cmd_store_restore)
+    store_migrate = store_sub.add_parser("migrate")
+    _add_workspace_options(store_migrate)
+    store_migrate.set_defaults(handler=_cmd_store_migrate)
+    store_compact = store_sub.add_parser("compact")
+    _add_workspace_options(store_compact)
+    store_compact.add_argument("--apply", action="store_true")
+    store_compact.set_defaults(handler=_cmd_store_compact)
 
     # tools
     tools = rpa_sub.add_parser("tools", help="List global + project tools")
@@ -306,12 +378,44 @@ def _build_parser() -> argparse.ArgumentParser:
     art_sub = artifacts.add_subparsers(dest="artifact_command", required=True)
     art_put = art_sub.add_parser("put", help="Store a file on the run")
     _add_run_options(art_put)
-    art_put.add_argument("--file", required=True)
+    art_put.add_argument("--file", "--source", dest="file", required=True)
     art_put.add_argument("--name", default=None)
     art_put.set_defaults(handler=_cmd_artifact_put)
     art_list = art_sub.add_parser("list", help="List artifacts for a run")
     _add_run_options(art_list)
     art_list.set_defaults(handler=_cmd_artifact_list)
+    art_export = art_sub.add_parser("export", help="Copy an artifact to an external path")
+    _add_workspace_options(art_export)
+    art_export.add_argument("artifact_id")
+    art_export.add_argument("--run-id", default=None)
+    art_export.add_argument("--output", required=True)
+    art_export.set_defaults(handler=_cmd_artifact_export)
+
+    input_cmd = rpa_sub.add_parser("input", help="Materialize an external file into a run")
+    input_sub = input_cmd.add_subparsers(dest="input_command", required=True)
+    input_add = input_sub.add_parser("add")
+    _add_run_options(input_add)
+    input_add.add_argument("source")
+    input_add.add_argument("--as", dest="name", required=True)
+    input_add.set_defaults(handler=_cmd_input_add)
+
+    run_files = rpa_sub.add_parser("files", help="List logical files for one run")
+    _add_run_options(run_files)
+    run_files.set_defaults(handler=_cmd_run_files)
+
+    gc = rpa_sub.add_parser("gc", help="Plan and apply conservative retention")
+    gc_sub = gc.add_subparsers(dest="gc_command", required=True)
+    gc_plan = gc_sub.add_parser("plan")
+    _add_workspace_options(gc_plan)
+    gc_plan.set_defaults(handler=_cmd_gc_plan)
+    gc_show = gc_sub.add_parser("show")
+    _add_workspace_options(gc_show)
+    gc_show.add_argument("plan_id")
+    gc_show.set_defaults(handler=_cmd_gc_show)
+    gc_apply = gc_sub.add_parser("apply")
+    _add_workspace_options(gc_apply)
+    gc_apply.add_argument("plan_id")
+    gc_apply.set_defaults(handler=_cmd_gc_apply)
 
     # phases
     phase = rpa_sub.add_parser("phase", help="Checkpointed run phases + handoff packages")
@@ -571,6 +675,53 @@ def _cmd_project_show(args: argparse.Namespace) -> dict[str, Any]:
     return {"ok": True, **ws.to_dict()}
 
 
+def _cmd_project_paths(args: argparse.Namespace) -> dict[str, Any]:
+    return {"ok": True, **_workspace(args).to_dict()}
+
+
+def _cmd_project_doctor(args: argparse.Namespace) -> dict[str, Any]:
+    ws = _workspace(args)
+    checks: dict[str, Any] = {
+        "layout_version": ws.layout_version,
+        "project_manifest": ws.config_path.is_file(),
+        "environment_manifest": ws.environment_config_path.is_file(),
+        "plaintext_secrets_absent": not (ws.project_root / "secrets.json").exists(),
+        "paths_contained": all(
+            path.is_relative_to(ws.project_root)
+            for path in (
+                ws.project_skills,
+                ws.automations,
+                ws.channels,
+                ws.reference,
+                ws.environment_root,
+            )
+        ),
+    }
+    errors = [name for name, passed in checks.items() if passed is False]
+    store = None
+    if ws.db.is_file():
+        store = (
+            StoreLifecycle()
+            .check(
+                ws,
+                "full" if args.full else "quick",
+            )
+            .to_dict()
+        )
+        if not store["ok"]:
+            errors.append("store")
+    return {
+        "ok": not errors,
+        **ws.to_dict(),
+        "checks": checks,
+        "store": store,
+        "errors": errors,
+        "next_action": (
+            None if not errors else "Run the reported check directly; repairs are never implicit."
+        ),
+    }
+
+
 def _cmd_project_create(args: argparse.Namespace) -> dict[str, Any]:
     return create_project(
         args.home,
@@ -589,6 +740,33 @@ def _cmd_project_init(args: argparse.Namespace) -> dict[str, Any]:
     return init_home(args.home, project=args.project, display_name=args.display_name)
 
 
+def _cmd_project_export(args: argparse.Namespace) -> dict[str, Any]:
+    ws = Workspace.open(args.home, project=args.name, env="dev")
+    return (
+        ProjectArchive()
+        .export(
+            ws,
+            args.output,
+            mode=args.mode,
+        )
+        .to_dict()
+    )
+
+
+def _cmd_project_import(args: argparse.Namespace) -> dict[str, Any]:
+    return (
+        ProjectArchive()
+        .import_archive(
+            args.source,
+            resolve_home(args.home),
+            name=args.name,
+            verify_only=args.verify_only,
+            use=args.use,
+        )
+        .to_dict()
+    )
+
+
 def _cmd_env_show(args: argparse.Namespace) -> dict[str, Any]:
     ws = _workspace(args)
     return {"ok": True, **ws.to_dict()}
@@ -597,6 +775,45 @@ def _cmd_env_show(args: argparse.Namespace) -> dict[str, Any]:
 def _cmd_env_set(args: argparse.Namespace) -> dict[str, Any]:
     data = set_active_env(args.home, args.name, project=getattr(args, "project", None))
     return {"ok": True, **data}
+
+
+def _cmd_store_status(args: argparse.Namespace) -> dict[str, Any]:
+    return StoreLifecycle().inspect(_workspace(args)).to_dict()
+
+
+def _cmd_store_check(args: argparse.Namespace) -> dict[str, Any]:
+    return (
+        StoreLifecycle()
+        .check(
+            _workspace(args),
+            "full" if args.full else "quick",
+        )
+        .to_dict()
+    )
+
+
+def _cmd_store_backup(args: argparse.Namespace) -> dict[str, Any]:
+    return StoreLifecycle().backup(_workspace(args), args.output).to_dict()
+
+
+def _cmd_store_restore(args: argparse.Namespace) -> dict[str, Any]:
+    return StoreLifecycle().restore(_workspace(args), args.source).to_dict()
+
+
+def _cmd_store_migrate(args: argparse.Namespace) -> dict[str, Any]:
+    return StoreLifecycle().migrate(_workspace(args)).to_dict()
+
+
+def _cmd_store_compact(args: argparse.Namespace) -> dict[str, Any]:
+    return (
+        StoreLifecycle()
+        .compact(
+            _workspace(args),
+            {},
+            apply=args.apply,
+        )
+        .to_dict()
+    )
 
 
 def _cmd_tools(args: argparse.Namespace) -> dict[str, Any]:
@@ -646,8 +863,8 @@ def _cmd_start(args: argparse.Namespace) -> dict[str, Any]:
         "run_id": harness.runtime.run_id,
         "db": str(ws.db),
         "project_skills_root": str(ws.project_skills),
-        "artifacts_root": str(ws.artifacts / harness.runtime.run_id),
-        "phases_root": str(ws.artifacts / harness.runtime.run_id / "phases"),
+        "artifacts_root": str(ws.runs / harness.runtime.run_id / "artifacts"),
+        "phases_root": str(ws.runs / harness.runtime.run_id / "phases"),
         "goal": args.goal,
         "object_id": run.id,
         "auto_approve": harness.auto_approve,
@@ -751,6 +968,16 @@ def _cmd_ui(args: argparse.Namespace) -> None:
     )
 
 
+def _cmd_diagnostics_show(args: argparse.Namespace) -> dict[str, Any]:
+    items = DiagnosticSink(args.home).read(limit=args.limit)
+    return {
+        "ok": True,
+        "home": str(resolve_home(args.home)),
+        "diagnostics": items,
+        "count": len(items),
+    }
+
+
 def _cmd_cancel(args: argparse.Namespace) -> dict[str, Any]:
     _validate_run_id(args.run_id)
     ws = _workspace(args)
@@ -850,7 +1077,9 @@ def _cmd_artifact_put(args: argparse.Namespace) -> dict[str, Any]:
         auto_approve=args.auto_approve,
         create_if_missing=False,
     )
-    return harness.put_artifact(args.file, name=args.name)
+    result = harness.put_artifact(args.file, name=args.name)
+    result.pop("path", None)
+    return result
 
 
 def _cmd_artifact_list(args: argparse.Namespace) -> dict[str, Any]:
@@ -865,6 +1094,128 @@ def _cmd_artifact_list(args: argparse.Namespace) -> dict[str, Any]:
     )
     items = harness.list_artifacts()
     return {"ok": True, "run_id": args.run_id, "artifacts": items, "count": len(items)}
+
+
+def _cmd_artifact_export(args: argparse.Namespace) -> dict[str, Any]:
+    ws = _workspace(args)
+    storage = RunStorage(ws)
+    matches = [
+        (run_dir.name, item)
+        for run_dir in ws.runs.iterdir()
+        if run_dir.is_dir() and not run_dir.name.startswith(".")
+        for item in storage.list(run_dir.name)
+        if item.artifact_id == args.artifact_id
+        and (args.run_id is None or run_dir.name == args.run_id)
+    ]
+    if len(matches) != 1:
+        msg = (
+            f"artifact.file_missing: expected one match for {args.artifact_id}, got {len(matches)}"
+        )
+        raise FileNotFoundError(msg)
+    run_id, attachment = matches[0]
+    target = Path(args.output).expanduser().resolve()
+    if target.exists():
+        msg = f"artifact export destination exists: {target}"
+        raise FileExistsError(msg)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    staging = target.with_name(f".{target.name}.export")
+    try:
+        shutil.copyfile(attachment.path, staging)
+        staging.chmod(0o600)
+        staging.replace(target)
+    finally:
+        if staging.exists():
+            staging.unlink()
+    return {
+        "ok": True,
+        "artifact_id": attachment.artifact_id,
+        "uri": attachment.uri,
+        "run_id": run_id,
+        "output": str(target),
+        "bytes": attachment.bytes,
+        "sha256": attachment.sha256,
+    }
+
+
+def _cmd_input_add(args: argparse.Namespace) -> dict[str, Any]:
+    ws = _workspace(args)
+    storage = RunStorage(ws)
+    paths = storage.prepare(args.run_id)
+    source = Path(args.source).expanduser().resolve()
+    if source.is_symlink() or not source.is_file():
+        msg = f"run input source is not a regular file: {source}"
+        raise FileNotFoundError(msg)
+    logical = LogicalPath.parse(f"run://input/{args.name}")
+    destination = (
+        PathResolver()
+        .resolve(
+            logical,
+            PathScope(ws, run_id=args.run_id),
+            "create",
+        )
+        .physical
+    )
+    if destination.exists():
+        msg = f"run input already exists: {logical}"
+        raise FileExistsError(msg)
+    staging = paths.input / f".{destination.name}.input"
+    try:
+        shutil.copyfile(source, staging)
+        staging.chmod(0o600)
+        staging.replace(destination)
+    finally:
+        if staging.exists():
+            staging.unlink()
+    return {
+        "ok": True,
+        "run_id": args.run_id,
+        "path": str(logical),
+        "bytes": destination.stat().st_size,
+    }
+
+
+def _cmd_run_files(args: argparse.Namespace) -> dict[str, Any]:
+    ws = _workspace(args)
+    paths = RunStorage(ws).paths(args.run_id)
+    files: list[dict[str, Any]] = []
+    for root_name, root in (
+        ("input", paths.input),
+        ("work", paths.work),
+        ("output", paths.output),
+        ("tmp", paths.tmp),
+    ):
+        if not root.is_dir():
+            continue
+        files.extend(
+            {
+                "path": f"run://{root_name}/{path.relative_to(root).as_posix()}",
+                "bytes": path.stat().st_size,
+            }
+            for path in root.rglob("*")
+            if path.is_file() and not path.is_symlink()
+        )
+    artifacts = [item.to_dict() for item in RunStorage(ws).list(args.run_id)]
+    return {
+        "ok": True,
+        "run_id": args.run_id,
+        "files": files,
+        "artifacts": artifacts,
+    }
+
+
+def _cmd_gc_plan(args: argparse.Namespace) -> dict[str, Any]:
+    ws = _workspace(args)
+    return RetentionPlanner().plan(ws).to_dict()
+
+
+def _cmd_gc_show(args: argparse.Namespace) -> dict[str, Any]:
+    ws = _workspace(args)
+    return RetentionPlanner().inspect(ws, args.plan_id).to_dict()
+
+
+def _cmd_gc_apply(args: argparse.Namespace) -> dict[str, Any]:
+    ws = _workspace(args)
+    return RetentionPlanner().apply(ws, args.plan_id).to_dict()
 
 
 def _cmd_phase_begin(args: argparse.Namespace) -> dict[str, Any]:

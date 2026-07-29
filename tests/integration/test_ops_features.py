@@ -73,7 +73,8 @@ def test_artifacts_and_budget(tmp_path: Path) -> None:
     sample.write_text("a,b\n1,2\n", encoding="utf-8")
     meta = harness.put_artifact(sample, name="orders.csv")
     assert meta["name"] == "orders.csv"
-    assert (ws.artifacts / "ops1" / "orders.csv").is_file()
+    assert Path(meta["path"]).is_file()
+    assert meta["uri"].startswith("artifact://")
 
     # budget enforcement
     tight = RunSession.create(

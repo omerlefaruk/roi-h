@@ -2,6 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 from pydantic import BaseModel
 TOOL_ID="write"; DESCRIPTION="Write a text file."; DETERMINISTIC=True; REQUIRES_APPROVAL=False
+FILESYSTEM_ROOTS=("run:work:read-write","run:output:read-write","run:tmp:read-write")
 class Input(BaseModel):
     path: str
     text: str = ""

@@ -3,6 +3,7 @@ import urllib.request
 from pathlib import Path
 from pydantic import BaseModel, Field
 TOOL_ID="download"; DESCRIPTION="Download a URL to a local path."; DETERMINISTIC=False; REQUIRES_APPROVAL=False
+FILESYSTEM_ROOTS=("run:work:read-write","run:output:read-write","run:tmp:read-write")
 class Input(BaseModel):
     url: str
     path: str

@@ -50,7 +50,9 @@ under `~/.roi-h/skills`; project skills, automation packages, artifacts, databas
 browser profiles, and secrets live under `~/.roi-h/projects/<name>/`. Set `ROI_H_HOME`
 or pass `--home` to use another data home. None of this state belongs in the generic core
 repository or Python distribution.
-The authoritative storage, GitHub, and package rules are in
+The authoritative data-home and project-storage rules are in
+[`docs/project-storage-activegraph-refactor.md`](docs/project-storage-activegraph-refactor.md);
+application distribution and publication boundaries are in
 [`docs/distribution-and-updates.md`](docs/distribution-and-updates.md).
 
 Published versions are immutable, digest-verified snapshots. `ship` is the only CLI

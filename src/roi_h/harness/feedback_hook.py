@@ -14,12 +14,8 @@ def record_run_feedback(
     *,
     force: bool = True,
 ) -> dict[str, Any] | None:
-    """Record a compact run summary when ``feedback.record`` is installed."""
-    try:
-        harness.catalog.resolve("feedback", "record")
-    except KeyError:
-        return None
-
+    """Record compact run feedback directly as ActiveGraph domain history."""
+    del force
     feedback = build_run_feedback(recipe, result, list(result.get("executed") or []))
     feedback["summary"].update(
         {
@@ -28,28 +24,20 @@ def record_run_feedback(
             "run_id": harness.runtime.run_id,
         }
     )
-    try:
-        step = harness.invoke(
-            "feedback",
-            "record",
-            {
-                "automation": recipe.name,
-                "version": recipe.version,
-                "ok": bool(result.get("ok")),
-                **feedback,
-            },
-            actor="recipe",
-            force=force,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return {"status": "error", "error": str(exc)}
+    obj = harness.runtime.graph.add_object(
+        "rpa.feedback",
+        {
+            "run_id": harness.runtime.run_id,
+            "automation": recipe.name,
+            "version": recipe.version,
+            "ok": bool(result.get("ok")),
+            **feedback,
+        },
+        actor="recipe",
+    )
     return {
-        "status": step.status,
-        "output": step.output,
-        "error": step.error,
-        "failure": step.failure.model_dump(mode="json") if step.failure else None,
-        "invocation_id": step.invocation_id,
-        "attempt": step.attempt,
+        "status": "ok",
+        "object_id": obj.id,
     }
 
 

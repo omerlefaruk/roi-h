@@ -87,7 +87,7 @@ def test_phase_handoff_and_seed_api(tmp_path: Path) -> None:
     child.start_run("normalize only", phase_plan=["normalize"])
     seeded = child.seed_from_handoff(handoff_dir)
     assert seeded["count"] == 1
-    assert (ws.artifacts / "phase2" / "orders.csv").is_file()
+    assert child.list_artifacts()[0]["name"] == "orders.csv"
 
     child.begin_phase("normalize")
     nstep = child.invoke("browser", "snapshot", {})

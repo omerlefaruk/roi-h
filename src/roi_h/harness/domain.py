@@ -206,6 +206,7 @@ class HandoffManifest(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    schema_version: int = 1
     phase: str
     phase_id: str
     run_id: str

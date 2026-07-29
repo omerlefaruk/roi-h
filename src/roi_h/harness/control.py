@@ -38,4 +38,4 @@ def cancellation_request(workspace: Workspace, run_id: str) -> dict[str, Any] | 
 
 def cancellation_path(workspace: Workspace, run_id: str) -> Path:
     """Return the control-file path for a run."""
-    return workspace.artifacts / run_id / "runtime" / "cancel.json"
+    return workspace.runs / run_id / "runtime" / "cancel.json"

@@ -1,4 +1,4 @@
-"""Reconcile durable graph records with run artifact and handoff files."""
+"""Reconcile ActiveGraph artifact/handoff authority with durable run files."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from roi_h.harness import phases as phase_store
 from roi_h.harness.domain import ReconciliationIssue, ReconciliationReport
 from roi_h.harness.graph_access import phase_objects
 from roi_h.harness.records import ArtifactRecord
+from roi_h.harness.run_storage import ArtifactAttachment, RunStorage
 from roi_h.harness.workspace import Workspace
 
 
@@ -21,10 +22,21 @@ def reconcile_run(
     *,
     repair: bool = False,
 ) -> ReconciliationReport:
-    """Compare graph state with files and optionally apply unambiguous repairs."""
+    """Report drift and apply only uniquely derivable metadata repairs."""
     issues: list[ReconciliationIssue] = []
-    artifact_root = workspace.artifacts / runtime.run_id
-    disk_artifacts = _disk_artifacts(artifact_root)
+    storage = RunStorage(workspace)
+    paths = storage.paths(runtime.run_id)
+    storage_report = storage.reconcile(runtime.run_id, repair=repair)
+    for malformed in storage_report["malformed"]:
+        issues.append(
+            _issue(
+                "artifact_directory_invalid",
+                "error",
+                f"invalid artifact directory: {malformed}",
+            )
+        )
+
+    disk = {item.name: item for item in storage.list(runtime.run_id)}
     graph_artifacts = [
         obj
         for obj in runtime.graph.objects(type="rpa.artifact")
@@ -46,23 +58,18 @@ def reconcile_run(
             )
             continue
         obj = objects[0]
-        metadata = disk_artifacts.get(name)
-        if metadata is None:
+        attachment = disk.get(name)
+        if attachment is None:
             issues.append(
                 _issue(
                     "artifact_missing_file",
                     "error",
                     f"graph artifact {name!r} has no corresponding file",
                     object_id=obj.id,
-                    path=str(artifact_root / name),
                 )
             )
             continue
-        expected = {
-            "path": metadata["path"],
-            "bytes": metadata["bytes"],
-            "sha256": metadata["sha256"],
-        }
+        expected = _graph_metadata(attachment)
         actual = {key: obj.data.get(key) for key in expected}
         if actual != expected:
             repaired = False
@@ -75,24 +82,28 @@ def reconcile_run(
                     "error",
                     f"graph metadata for artifact {name!r} does not match its file",
                     object_id=obj.id,
-                    path=metadata["path"],
+                    path=str(attachment.path),
                     repaired=repaired,
                     details={"graph": actual, "filesystem": expected},
                 )
             )
 
-    for name, metadata in sorted(disk_artifacts.items()):
+    for name, attachment in sorted(disk.items()):
         if name in by_name:
             continue
         repaired = False
         object_id: str | None = None
         if repair:
             record = ArtifactRecord(
+                artifact_id=attachment.artifact_id,
                 run_id=runtime.run_id,
-                name=name,
-                path=metadata["path"],
-                bytes=metadata["bytes"],
-                sha256=metadata["sha256"],
+                name=attachment.name,
+                uri=attachment.uri,
+                bytes=attachment.bytes,
+                sha256=attachment.sha256,
+                media_type=attachment.media_type,
+                source="",
+                created_at=attachment.created_at,
             )
             object_id = runtime.graph.add_object("rpa.artifact", record.to_graph()).id
             repaired = True
@@ -102,7 +113,7 @@ def reconcile_run(
                 "warning",
                 f"artifact file {name!r} has no graph record",
                 object_id=object_id,
-                path=metadata["path"],
+                path=str(attachment.path),
                 repaired=repaired,
             )
         )
@@ -110,24 +121,20 @@ def reconcile_run(
     phases = [obj for obj in phase_objects(runtime) if obj.data.get("run_id") == runtime.run_id]
     expected_packages: set[Path] = set()
     for phase in phases:
-        expected = (
-            artifact_root
-            / "phases"
-            / f"{int(phase.data.get('index') or 0):02d}-{phase.data.get('name') or ''}"
+        expected_package = (
+            paths.phases / f"{int(phase.data.get('index') or 0):02d}-{phase.data.get('name') or ''}"
         ).resolve()
-        expected_packages.add(expected)
+        expected_packages.add(expected_package)
         _reconcile_phase(
             runtime,
             workspace,
             phase,
-            expected,
+            expected_package,
             issues,
             repair=repair,
         )
-
-    phases_dir = artifact_root / "phases"
-    if phases_dir.is_dir():
-        for child in sorted(phases_dir.iterdir()):
+    if paths.phases.is_dir():
+        for child in sorted(paths.phases.iterdir()):
             if (
                 child.is_dir()
                 and (child / "manifest.json").is_file()
@@ -143,11 +150,10 @@ def reconcile_run(
                 )
 
     repairs = sum(1 for issue in issues if issue.repaired)
-    ok = not any(not issue.repaired for issue in issues)
     return ReconciliationReport(
         run_id=runtime.run_id,
         repair_requested=repair,
-        ok=ok,
+        ok=not any(not issue.repaired for issue in issues),
         artifacts_scanned=len(graph_artifacts),
         phases_scanned=len(phases),
         repairs=repairs,
@@ -167,34 +173,23 @@ def _reconcile_phase(
     data = phase.data
     status = str(data.get("status") or "open")
     artifact_names = [str(name) for name in data.get("artifact_names") or []]
-    needs_handoff = status == "done" or bool(artifact_names) or bool(data.get("handoff_path"))
-    if not needs_handoff:
+    if status != "done" and not artifact_names and not data.get("handoff_path"):
         return
+    storage = RunStorage(workspace)
+    source_paths: list[Path] = []
+    missing_sources: list[str] = []
+    for name in artifact_names:
+        try:
+            source_paths.append(storage.artifact_path(runtime.run_id, name=name))
+        except FileNotFoundError:
+            missing_sources.append(name)
 
     manifest_path = expected / "manifest.json"
     if not manifest_path.is_file():
-        missing = [
-            name
-            for name in artifact_names
-            if not (workspace.artifacts / runtime.run_id / name).is_file()
-        ]
         repaired = False
-        if repair and not missing and status in {"done", "failed", "skipped"}:
-            handoff = phase_store.write_handoff(
-                workspace.artifacts,
-                run_id=runtime.run_id,
-                index=int(data.get("index") or 0),
-                name=str(data.get("name") or ""),
-                phase_id=phase.id,
-                status=status,
-                artifact_paths=[
-                    workspace.artifacts / runtime.run_id / name for name in artifact_names
-                ],
-                summary=dict(data.get("summary") or {}),
-                require_artifacts=list(data.get("require_artifacts") or []),
-                source_run_id=data.get("source_run_id"),
-            )
-            runtime.graph.patch_object(phase.id, {"handoff_path": handoff["handoff_path"]})
+        if repair and not missing_sources and status in {"done", "failed", "skipped"}:
+            handoff = _write_handoff(runtime, workspace, phase, status, source_paths)
+            runtime.graph.patch_object(phase.id, {"handoff_path": handoff["handoff_uri"]})
             repaired = True
         issues.append(
             _issue(
@@ -204,7 +199,7 @@ def _reconcile_phase(
                 object_id=phase.id,
                 path=str(manifest_path),
                 repaired=repaired,
-                details={"missing_source_artifacts": missing},
+                details={"missing_source_artifacts": missing_sources},
             )
         )
         return
@@ -236,21 +231,14 @@ def _reconcile_phase(
                 f"phase {data.get('name')!r} handoff identity does not match graph state",
                 object_id=phase.id,
                 path=str(manifest_path),
-                details={
-                    "manifest_phase_id": manifest.phase_id,
-                    "manifest_run_id": manifest.run_id,
-                    "manifest_phase": manifest.phase,
-                    "manifest_index": manifest.index,
-                },
             )
         )
         return
 
-    root = workspace.artifacts / runtime.run_id
-    missing_files = [name for name in manifest.artifacts if not (package / name).is_file()]
     content_drift: dict[str, Any] = {}
-    if missing_files:
-        content_drift["missing_package_artifacts"] = missing_files
+    missing_package = [name for name in manifest.artifacts if not (package / name).is_file()]
+    if missing_package:
+        content_drift["missing_package_artifacts"] = missing_package
     expected_content = {
         "status": status,
         "artifacts": artifact_names,
@@ -268,31 +256,20 @@ def _reconcile_phase(
             "graph": expected_content,
             "filesystem": actual_content,
         }
-    changed_copies = [
+    sources = {path.name: path for path in source_paths}
+    changed = [
         name
         for name in artifact_names
-        if (root / name).is_file()
+        if name in sources
         and (package / name).is_file()
-        and _sha256(root / name) != _sha256(package / name)
+        and _sha256(sources[name]) != _sha256(package / name)
     ]
-    if changed_copies:
-        content_drift["changed_artifacts"] = changed_copies
-    missing_sources = [name for name in artifact_names if not (root / name).is_file()]
+    if changed:
+        content_drift["changed_artifacts"] = changed
     if content_drift:
         repaired = False
         if repair and not missing_sources and status in {"done", "failed", "skipped"}:
-            phase_store.write_handoff(
-                workspace.artifacts,
-                run_id=runtime.run_id,
-                index=int(data.get("index") or 0),
-                name=str(data.get("name") or ""),
-                phase_id=phase.id,
-                status=status,
-                artifact_paths=[root / name for name in artifact_names],
-                summary=dict(data.get("summary") or {}),
-                require_artifacts=list(data.get("require_artifacts") or []),
-                source_run_id=data.get("source_run_id"),
-            )
+            _write_handoff(runtime, workspace, phase, status, source_paths)
             repaired = True
         content_drift["missing_source_artifacts"] = missing_sources
         issues.append(
@@ -307,43 +284,62 @@ def _reconcile_phase(
             )
         )
 
-    graph_path = str(data.get("handoff_path") or "")
-    expected_path = str(package.resolve())
-    if graph_path != expected_path:
+    expected_uri = (
+        f"run-handoff://{runtime.run_id}/"
+        f"{package.relative_to(workspace.runs / runtime.run_id).as_posix()}"
+    )
+    graph_uri = str(data.get("handoff_path") or "")
+    if graph_uri != expected_uri:
         repaired = False
         if repair:
-            runtime.graph.patch_object(phase.id, {"handoff_path": expected_path})
+            runtime.graph.patch_object(phase.id, {"handoff_path": expected_uri})
             repaired = True
         issues.append(
             _issue(
                 "phase_handoff_path_mismatch",
                 "error",
-                f"phase {data.get('name')!r} graph handoff path is stale or missing",
+                f"phase {data.get('name')!r} graph handoff URI is stale or missing",
                 object_id=phase.id,
-                path=expected_path,
+                path=str(package),
                 repaired=repaired,
-                details={"graph_path": graph_path},
+                details={"graph_uri": graph_uri, "expected_uri": expected_uri},
             )
         )
 
 
-def _disk_artifacts(root: Path) -> dict[str, dict[str, Any]]:
-    if not root.is_dir():
-        return {}
-    result: dict[str, dict[str, Any]] = {}
-    for path in sorted(root.iterdir()):
-        if not path.is_file():
-            continue
-        result[path.name] = {
-            "path": str(path.resolve()),
-            "bytes": path.stat().st_size,
-            "sha256": _sha256(path),
-        }
-    return result
+def _write_handoff(
+    runtime: Runtime,
+    workspace: Workspace,
+    phase: Object,
+    status: str,
+    source_paths: list[Path],
+) -> dict[str, Any]:
+    return phase_store.write_handoff(
+        workspace.runs,
+        run_id=runtime.run_id,
+        index=int(phase.data.get("index") or 0),
+        name=str(phase.data.get("name") or ""),
+        phase_id=phase.id,
+        status=status,
+        artifact_paths=source_paths,
+        summary=dict(phase.data.get("summary") or {}),
+        require_artifacts=list(phase.data.get("require_artifacts") or []),
+        source_run_id=phase.data.get("source_run_id"),
+    )
+
+
+def _graph_metadata(attachment: ArtifactAttachment) -> dict[str, Any]:
+    return {
+        "artifact_id": attachment.artifact_id,
+        "uri": attachment.uri,
+        "bytes": attachment.bytes,
+        "sha256": attachment.sha256,
+        "media_type": attachment.media_type,
+    }
 
 
 def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
 
 
 def _issue(

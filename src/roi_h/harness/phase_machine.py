@@ -5,13 +5,11 @@ Owns graph field layout for ``rpa.phase`` together with disk handoffs.
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from typing import Any
 
 from activegraph import Object, Runtime
 
-from roi_h.harness import artifacts as artifact_store
 from roi_h.harness import phases as phase_store
 from roi_h.harness.domain import PhaseStatus, infer_phase_role, validate_phase_name
 from roi_h.harness.graph_access import (
@@ -25,6 +23,7 @@ from roi_h.harness.graph_access import (
     plan_entry,
 )
 from roi_h.harness.records import ArtifactRecord, PhaseRecord
+from roi_h.harness.run_storage import RunStorage
 from roi_h.harness.workspace import Workspace
 
 
@@ -119,7 +118,7 @@ def end_phase(
             "summary": dict(summary or {}),
             "error": error,
             "require_artifacts": required,
-            "handoff_path": handoff["handoff_path"] if handoff else None,
+            "handoff_path": handoff["handoff_uri"] if handoff else None,
             "end_event_id": None,
         },
     )
@@ -134,6 +133,8 @@ def end_phase(
         raise RuntimeError(msg)
     result = phase_dict(runtime, refreshed)
     if handoff:
+        result["handoff_uri"] = result.get("handoff_path")
+        result["handoff_path"] = handoff["handoff_path"]
         result["handoff"] = handoff
     return result
 
@@ -228,11 +229,8 @@ def seed_from_handoff(
     seeded: list[dict[str, Any]] = []
     for manifest, package in packages:
         files = phase_store.list_handoff_files(package, manifest)
-        phase_store.copy_artifacts_to_run(
-            workspace.artifacts,
-            run_id=runtime.run_id,
-            files=files,
-        )
+        storage = RunStorage(workspace)
+        attachments = [storage.attach(runtime.run_id, path, name=path.name) for path in files]
         handoff = phase_store.write_handoff(
             workspace.artifacts,
             run_id=runtime.run_id,
@@ -240,31 +238,22 @@ def seed_from_handoff(
             name=manifest.phase,
             phase_id=f"seeded:{manifest.phase_id}",
             status="done",
-            artifact_paths=[
-                artifact_store.get_artifact_path(
-                    workspace.artifacts,
-                    run_id=runtime.run_id,
-                    name=name,
-                )
-                for name in manifest.artifacts
-            ],
+            artifact_paths=[item.path for item in attachments],
             summary=dict(manifest.summary),
             require_artifacts=list(manifest.require_artifacts),
             source_run_id=manifest.run_id,
         )
-        for name in manifest.artifacts:
-            path = artifact_store.get_artifact_path(
-                workspace.artifacts,
-                run_id=runtime.run_id,
-                name=name,
-            )
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        for attachment in attachments:
             art = ArtifactRecord(
+                artifact_id=attachment.artifact_id,
                 run_id=runtime.run_id,
-                name=name,
-                path=str(path),
-                bytes=path.stat().st_size,
-                sha256=digest,
+                name=attachment.name,
+                uri=attachment.uri,
+                bytes=attachment.bytes,
+                sha256=attachment.sha256,
+                media_type=attachment.media_type,
+                source=attachment.source,
+                created_at=attachment.created_at,
                 phase=manifest.phase,
                 phase_id=None,
                 seeded=True,
@@ -279,7 +268,7 @@ def seed_from_handoff(
             require_artifacts=list(manifest.require_artifacts),
             artifact_names=list(manifest.artifacts),
             summary=dict(manifest.summary),
-            handoff_path=handoff["handoff_path"],
+            handoff_path=handoff["handoff_uri"],
             end_event_id=(list(runtime.graph.events)[-1].id if runtime.graph.events else None),
             seeded=True,
             source_run_id=manifest.run_id,
@@ -291,7 +280,7 @@ def seed_from_handoff(
     patch_run(
         runtime,
         {
-            "seeded_from": str(Path(handoff_path).expanduser().resolve()),
+            "seeded_from": f"handoff:{manifest.run_id}",
             "current_phase_id": None,
             "current_phase": None,
         },
@@ -301,7 +290,7 @@ def seed_from_handoff(
         "run_id": runtime.run_id,
         "seeded_phases": seeded,
         "count": len(seeded),
-        "handoff_path": str(Path(handoff_path).expanduser().resolve()),
+        "handoff": f"handoff:{packages[0][0].run_id}",
     }
 
 
@@ -312,21 +301,24 @@ def put_artifact(
     *,
     name: str | None = None,
 ) -> dict[str, Any]:
-    meta = artifact_store.put_artifact(
-        workspace.artifacts,
-        run_id=runtime.run_id,
-        source=source,
-        name=name,
-    )
+    attachment = RunStorage(workspace).attach(runtime.run_id, source, name=name)
+    meta = attachment.to_dict()
+    # Compatibility for direct Python callers that need to inspect/corrupt a fixture.
+    # This physical value is never written to ActiveGraph, recipes, or manifests.
+    meta["path"] = str(attachment.path)
     current = current_phase_object(runtime)
     phase_name = current.data.get("name") if current is not None else None
     phase_id = current.id if current is not None else None
     record = ArtifactRecord(
+        artifact_id=attachment.artifact_id,
         run_id=runtime.run_id,
-        name=meta["name"],
-        path=meta["path"],
-        bytes=meta["bytes"],
-        sha256=meta["sha256"],
+        name=attachment.name,
+        uri=attachment.uri,
+        bytes=attachment.bytes,
+        sha256=attachment.sha256,
+        media_type=attachment.media_type,
+        source=attachment.source,
+        created_at=attachment.created_at,
         phase=str(phase_name) if phase_name is not None else None,
         phase_id=phase_id,
     )
@@ -343,7 +335,7 @@ def put_artifact(
 
 
 def list_artifacts(workspace: Workspace, run_id: str) -> list[dict[str, Any]]:
-    return artifact_store.list_artifacts(workspace.artifacts, run_id=run_id)
+    return [item.to_dict() for item in RunStorage(workspace).list(run_id)]
 
 
 def _assert_required_artifacts(
@@ -371,13 +363,7 @@ def _resolve_phase_artifact_paths(
     paths: list[Path] = []
     for name in names:
         try:
-            paths.append(
-                artifact_store.get_artifact_path(
-                    workspace.artifacts,
-                    run_id=run_id,
-                    name=name,
-                )
-            )
+            paths.append(RunStorage(workspace).artifact_path(run_id, name=name))
         except FileNotFoundError:
             if status == "done":
                 raise

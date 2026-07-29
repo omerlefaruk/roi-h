@@ -7,12 +7,13 @@ import csv
 import json
 import mimetypes
 import re
-import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from openpyxl import load_workbook  # type: ignore[import-untyped]
+
+from roi_h.observer.activegraph_adapter import ActiveGraphProjectionAdapter
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -29,6 +30,7 @@ _MAX_ARTIFACTS_PER_RUN = 250
 _TABLE_PREVIEW_ROWS = 50
 _TABLE_PREVIEW_COLUMNS = 20
 _TEXT_PREVIEW_BYTES = 131_072
+_CURRENT_LAYOUT_VERSION = 4
 
 
 class ObserverLookupError(LookupError):
@@ -39,7 +41,7 @@ def catalog(home: Path) -> dict[str, Any]:
     """Return the projects and environments that have durable databases."""
     home = home.resolve()
     home_config = _read_json(home / "config.json")
-    active_project = str(home_config.get("project") or "")
+    active_project = str(home_config.get("active_project") or home_config.get("project") or "")
     projects: list[dict[str, Any]] = []
     projects_root = home / "projects"
     if not projects_root.is_dir():
@@ -48,10 +50,14 @@ def catalog(home: Path) -> dict[str, Any]:
     for project_root in sorted(path for path in projects_root.iterdir() if path.is_dir()):
         if not _VALID_PROJECT.fullmatch(project_root.name):
             continue
-        config = _read_json(project_root / "config.json")
-        environments = [
-            env for env in ("dev", "prod") if (project_root / env / "rpa.sqlite").is_file()
-        ]
+        manifest = project_root / "project.json"
+        config = _read_json(manifest if manifest.is_file() else project_root / "config.json")
+        environments = []
+        for env in ("dev", "prod"):
+            current = project_root / "environments" / env / "store" / "activegraph.sqlite"
+            legacy = project_root / env / "rpa.sqlite"
+            if current.is_file() or legacy.is_file():
+                environments.append(env)
         if not environments:
             continue
         projects.append(
@@ -79,43 +85,31 @@ def list_runs(
     selected: list[dict[str, Any]] = []
     for workspace in _iter_workspaces(home, project=project, env=env):
         database = workspace["database"]
-        with _connect_read_only(database) as connection:
-            rows = connection.execute(
-                """
-                SELECT run_id, created_at, goal, label
-                FROM runs
-                ORDER BY created_at DESC
-                LIMIT ?
-                """,
-                (_MAX_RUNS_PER_DATABASE,),
-            ).fetchall()
-            for row in rows:
-                projection = _project_run(connection, str(row["run_id"]))
-                selected.append(
-                    _run_card(
-                        projection,
-                        project=str(workspace["project"]),
-                        project_display_name=str(workspace["display_name"]),
-                        env=str(workspace["env"]),
-                        fallback_created_at=str(row["created_at"] or ""),
-                        fallback_goal=str(row["goal"] or row["label"] or row["run_id"]),
-                    )
+        adapter = ActiveGraphProjectionAdapter(database)
+        for row in adapter.list_run_headers(limit=_MAX_RUNS_PER_DATABASE):
+            projection = adapter.project_run(str(row["run_id"]))
+            selected.append(
+                _run_card(
+                    projection,
+                    project=str(workspace["project"]),
+                    project_display_name=str(workspace["display_name"]),
+                    env=str(workspace["env"]),
+                    fallback_created_at=str(row["created_at"] or ""),
+                    fallback_goal=str(row["goal"] or row["label"] or row["run_id"]),
                 )
+            )
     return sorted(selected, key=lambda item: str(item["updated_at"]), reverse=True)
 
 
 def get_run(home: Path, *, project: str, env: str, run_id: str) -> dict[str, Any]:
     """Return the human-facing story for one run."""
     workspace = _workspace(home, project, env)
-    with _connect_read_only(workspace["database"]) as connection:
-        exists = connection.execute(
-            "SELECT created_at, goal, label FROM runs WHERE run_id = ?",
-            (run_id,),
-        ).fetchone()
-        if exists is None:
-            msg = f"run not found: {project}/{env}/{run_id}"
-            raise ObserverLookupError(msg)
-        projection = _project_run(connection, run_id)
+    adapter = ActiveGraphProjectionAdapter(workspace["database"])
+    exists = adapter.run_header(run_id)
+    if exists is None:
+        msg = f"run not found: {project}/{env}/{run_id}"
+        raise ObserverLookupError(msg)
+    projection = adapter.project_run(run_id)
 
     card = _run_card(
         projection,
@@ -125,12 +119,10 @@ def get_run(home: Path, *, project: str, env: str, run_id: str) -> dict[str, Any
         fallback_created_at=str(exists["created_at"] or ""),
         fallback_goal=str(exists["goal"] or exists["label"] or run_id),
     )
-    registered_artifacts = _registered_artifacts(
-        projection,
-        artifact_root=workspace["artifacts"] / run_id,
-    )
+    artifact_root = _artifact_root(workspace, run_id)
+    registered_artifacts = _registered_artifacts(projection, artifact_root=artifact_root)
     discovered_artifacts = _discover_artifacts(
-        workspace["artifacts"] / run_id,
+        artifact_root,
         registered_artifacts,
     )
     phases = _phase_story(projection, registered_artifacts)
@@ -203,7 +195,7 @@ def resolve_artifact(
         msg = f"invalid run id: {run_id!r}"
         raise ValueError(msg)
     workspace = _workspace(home, project, env)
-    artifact_root = (workspace["artifacts"] / run_id).resolve()
+    artifact_root = _artifact_root(workspace, run_id).resolve()
     path = (artifact_root / relative_path).resolve()
     try:
         path.relative_to(artifact_root)
@@ -241,8 +233,14 @@ def _workspace(home: Path, project: str, env: str) -> dict[str, Any]:
         msg = f"invalid environment: {env!r}"
         raise ValueError(msg)
     project_root = home.resolve() / "projects" / project
-    config = _read_json(project_root / "config.json")
-    database = project_root / env / "rpa.sqlite"
+    manifest = project_root / "project.json"
+    current = manifest.is_file()
+    config = _read_json(manifest if current else project_root / "config.json")
+    database = (
+        project_root / "environments" / env / "store" / "activegraph.sqlite"
+        if current
+        else project_root / env / "rpa.sqlite"
+    )
     if not database.is_file():
         msg = f"database not found: {project}/{env}"
         raise ObserverLookupError(msg)
@@ -251,65 +249,20 @@ def _workspace(home: Path, project: str, env: str) -> dict[str, Any]:
         "display_name": str(config.get("display_name") or project),
         "env": env,
         "database": database.resolve(),
-        "artifacts": (project_root / env / "artifacts").resolve(),
+        "runs": (
+            (project_root / "environments" / env / "runs").resolve()
+            if current
+            else (project_root / env / "artifacts").resolve()
+        ),
+        "layout_version": 4 if current else 3,
     }
 
 
-def _connect_read_only(path: Path) -> sqlite3.Connection:
-    connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA query_only = ON")
-    return connection
-
-
-def _project_run(connection: sqlite3.Connection, run_id: str) -> dict[str, Any]:
-    objects: dict[str, dict[str, Any]] = {}
-    first_timestamp = ""
-    last_timestamp = ""
-    rows = connection.execute(
-        """
-        SELECT type, payload, timestamp
-        FROM events
-        WHERE run_id = ? AND type IN ('object.created', 'patch.applied')
-        ORDER BY seq
-        """,
-        (run_id,),
-    )
-    for row in rows:
-        timestamp = str(row["timestamp"] or "")
-        first_timestamp = first_timestamp or timestamp
-        last_timestamp = timestamp or last_timestamp
-        payload = _parse_object(str(row["payload"] or "{}"))
-        if row["type"] == "object.created":
-            raw_object = payload.get("object")
-            if not isinstance(raw_object, dict):
-                continue
-            object_id = str(raw_object.get("id") or "")
-            data = raw_object.get("data")
-            if not object_id or not isinstance(data, dict):
-                continue
-            objects[object_id] = {
-                "id": object_id,
-                "type": str(raw_object.get("type") or ""),
-                "data": dict(data),
-                "created_at": timestamp,
-                "updated_at": timestamp,
-            }
-            continue
-        patch = payload.get("patch")
-        if not isinstance(patch, dict):
-            continue
-        target = str(patch.get("target") or "")
-        value = patch.get("value")
-        if target in objects and isinstance(value, dict):
-            objects[target]["data"].update(value)
-            objects[target]["updated_at"] = timestamp
-    return {
-        "run_id": run_id,
-        "objects": list(objects.values()),
-        "first_timestamp": first_timestamp,
-        "last_timestamp": last_timestamp,
-    }
+def _artifact_root(workspace: dict[str, Any], run_id: str) -> Path:
+    root = Path(workspace["runs"]) / run_id
+    if workspace.get("layout_version") == _CURRENT_LAYOUT_VERSION:
+        root /= "artifacts"
+    return root
 
 
 def _run_card(  # noqa: PLR0913
@@ -613,7 +566,21 @@ def _registered_artifacts(
             continue
         data = item["data"]
         raw_path = Path(str(data.get("path") or ""))
-        candidates = [raw_path, root / str(data.get("name") or "")]
+        artifact_id = str(data.get("artifact_id") or "")
+        identity_files = (
+            [
+                path
+                for path in root.glob(f"{artifact_id}--*")
+                if path.is_file() and not path.is_symlink()
+            ]
+            if artifact_id
+            else []
+        )
+        candidates = [
+            *identity_files,
+            raw_path,
+            root / str(data.get("name") or ""),
+        ]
         resolved = next(
             (
                 candidate.resolve()
@@ -627,8 +594,11 @@ def _registered_artifacts(
         metadata = _artifact_metadata(resolved, root)
         metadata.update(
             {
+                "name": str(data.get("name") or metadata["name"]),
                 "phase": data.get("phase"),
                 "phase_id": data.get("phase_id"),
+                "artifact_id": data.get("artifact_id"),
+                "uri": data.get("uri"),
                 "sha256": data.get("sha256"),
                 "registered": True,
             }

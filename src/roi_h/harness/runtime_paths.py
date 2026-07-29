@@ -21,10 +21,12 @@ def run_workspace(
         Path(home).expanduser().resolve()
         / "projects"
         / project
+        / "environments"
         / env
-        / "artifacts"
+        / "runs"
         / run_id
-        / "_workspace"
+        / "workspace"
+        / "work"
     )
 
 

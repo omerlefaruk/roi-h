@@ -52,6 +52,7 @@ def test_export_publish_run_round_trip(tmp_path: Path) -> None:
             "from pydantic import BaseModel, Field\n"
             "TOOL_ID='write_note'\nDESCRIPTION='w'\n"
             "REQUIRES_APPROVAL=False\n"
+            "FILESYSTEM_ROOTS=('run:output:read-write',)\n"
             "class Input(BaseModel):\n"
             "    text: str = 'hi'\n"
             "    path: str = Field(default='note.txt')\n"
@@ -81,7 +82,11 @@ def test_export_publish_run_round_trip(tmp_path: Path) -> None:
     harness.end_phase(summary={"url": "https://example.com/"})
 
     harness.begin_phase("finish")
-    step = harness.invoke("util", "write_note", {"text": "done", "path": str(tmp_path / "n.txt")})
+    step = harness.invoke(
+        "util",
+        "write_note",
+        {"text": "done", "path": "run://output/n.txt"},
+    )
     assert step.status == "ok"
     harness.put_artifact(step.output["path"], name="note.txt")
     harness.end_phase()
@@ -112,7 +117,7 @@ def test_export_publish_run_round_trip(tmp_path: Path) -> None:
         action="invoke",
         skill="util",
         tool="write_note",
-        args={"text": "done", "path": str(tmp_path / "run-note.txt")},
+        args={"text": "done", "path": "run://output/run-note.txt"},
     )
     recipe = Recipe(
         name=recipe.name,
@@ -140,9 +145,7 @@ def test_export_publish_run_round_trip(tmp_path: Path) -> None:
         recipe=recipe,
     )
     assert published["has_recipe"] is True
-    assert (
-        home / "projects" / "demo" / "dev" / "automations" / "demo-job" / "1.0.0" / "recipe.json"
-    ).is_file()
+    assert (ws.automations / "demo-job" / "1.0.0" / "recipe.json").is_file()
 
     push = push_to_prod(root=home, project="demo", name="demo-job", version="1.0.0")
     assert push["ok"] is True
@@ -164,7 +167,9 @@ def test_export_publish_run_round_trip(tmp_path: Path) -> None:
     assert result["ok"] is True, result
     assert result["step_count"] >= 2  # write_note + artifact put
     status = runner.status()
-    assert status["error_steps"] == 0
+    assert status["error_steps"] == 0, [
+        item for item in status["steps"] if item["data"]["status"] == "error"
+    ]
     phase_names = {p["name"]: p["status"] for p in status["phases"]}
     assert "browse" not in phase_names  # distilled out of prod recipe
     assert phase_names.get("finish") == "done"

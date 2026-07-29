@@ -11,6 +11,7 @@ from roi_h.harness.domain import Recipe, RecipePhase, RecipeStep
 from roi_h.harness.feedback_hook import record_run_feedback
 from roi_h.harness.graph_access import patch_run, run_object
 from roi_h.harness.recipe_lang import resolve_templates, validate_recipe
+from roi_h.harness.run_storage import RunStorage
 from roi_h.harness.secrets import resolve_secret_refs
 
 
@@ -449,6 +450,7 @@ def _finish_run(harness: RunSession, status: str) -> None:
         if request and request.get("reason"):
             fields["cancel_reason"] = str(request["reason"])
     patch_run(harness.runtime, fields)
+    RunStorage(harness.workspace).finalize(harness.runtime.run_id, status=status)
 
 
 __all__ = ["plan_recipe", "run_recipe"]

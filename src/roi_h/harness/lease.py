@@ -77,5 +77,5 @@ class RunLease:
 def run_lease(workspace: Workspace, run_id: str, *, timeout_seconds: float = 0.0) -> RunLease:
     """Create an exclusive lease for one durable run id."""
     safe = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in run_id)
-    path = workspace.project_root / ".locks" / workspace.env / f"{safe}.lock"
+    path = workspace.runtime / "locks" / f"run-{safe}.lock"
     return RunLease(path=path, run_id=run_id, timeout_seconds=timeout_seconds)

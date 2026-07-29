@@ -25,9 +25,11 @@ def test_create_list_use_project(tmp_path: Path) -> None:
     created = create_project(home, "acme-orders", display_name="Acme", set_active=True)
     assert created["ok"] is True
     assert created["project"] == "acme-orders"
-    assert (home / "projects" / "acme-orders" / "dev" / "skills").is_dir()
-    assert (home / "projects" / "acme-orders" / "prod" / "automations").is_dir()
-    assert (home / "projects" / "acme-orders" / "reference").is_dir()
+    project = home / "projects" / "acme-orders"
+    assert (project / "skills").is_dir()
+    assert (project / "packages" / "automations").is_dir()
+    assert (project / "environments" / "prod" / "store").is_dir()
+    assert (project / "reference").is_dir()
     assert (home / "skills").is_dir()
     assert get_active_project(home) == "acme-orders"
 
@@ -40,7 +42,7 @@ def test_create_list_use_project(tmp_path: Path) -> None:
     assert get_active_project(home) == "beta-finance"
     ws = Workspace.open(home)
     assert ws.project == "beta-finance"
-    assert ws.project_skills == (home / "projects" / "beta-finance" / "dev" / "skills").resolve()
+    assert ws.project_skills == (home / "projects" / "beta-finance" / "skills").resolve()
 
 
 def test_project_resolution_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -32,7 +32,13 @@ from roi_h.harness.domain import (
 from roi_h.harness.graph_access import phase_tags
 from roi_h.harness.jsonutil import json_object
 from roi_h.harness.loader import SkillCatalog, SkillTool
+from roi_h.harness.logical_paths import (
+    PathScope,
+    materialize_tool_payload,
+    normalize_tool_output,
+)
 from roi_h.harness.records import InvocationRecord, StepRecord
+from roi_h.harness.run_storage import RunStorage
 from roi_h.harness.secrets import (
     get_secret,
     redact_secret_values,
@@ -75,13 +81,21 @@ class IsolatedSkillInvoker:
         payload = args.model_dump(mode="json") if isinstance(args, BaseModel) else json_object(args)
         resolved = resolve_secret_refs(payload, self._workspace)
         worker_payload = resolved if isinstance(resolved, dict) else payload
+        run_id = _run_id_from_key(ctx.idempotency_key)
+        path_scope = PathScope(self._workspace, run_id=run_id)
+        worker_payload = materialize_tool_payload(
+            worker_payload,
+            scope=path_scope,
+            capabilities=skill_tool.filesystem_roots,
+            effect=skill_tool.effect,
+        )
         started = time.monotonic()
         try:
             output = _run_worker(
                 skill_tool,
                 worker_payload,
                 workspace=self._workspace,
-                run_id=_run_id_from_key(ctx.idempotency_key),
+                run_id=run_id,
                 idempotency_key=ctx.idempotency_key,
             )
         except subprocess.TimeoutExpired as exc:
@@ -104,8 +118,9 @@ class IsolatedSkillInvoker:
                     "exception_type": type(exc).__name__,
                 },
             ) from exc
+        normalized_output = normalize_tool_output(output, scope=path_scope)
         return CachedToolResponse(
-            output=json_object(redact_secret_values(output, self._workspace)),
+            output=json_object(redact_secret_values(normalized_output, self._workspace)),
             error=None,
             latency_seconds=max(0.0, time.monotonic() - started),
             cost_usd=Decimal(0),
@@ -478,6 +493,7 @@ def _run_worker(
     run_id: str,
     idempotency_key: str,
 ) -> dict[str, Any]:
+    paths = RunStorage(workspace).prepare(run_id)
     env = _worker_environment(
         skill_tool,
         payload,
@@ -492,7 +508,7 @@ def _run_worker(
         text=True,
         capture_output=True,
         check=False,
-        cwd=workspace.project_root,
+        cwd=paths.work,
         env=env,
         timeout=skill_tool.timeout_seconds,
     )
@@ -521,6 +537,7 @@ def _worker_environment(
     run_id: str,
     idempotency_key: str,
 ) -> dict[str, str]:
+    paths = RunStorage(workspace).prepare(run_id)
     allowed_base = {
         "PATH",
         "PYTHONPATH",
@@ -548,10 +565,11 @@ def _worker_environment(
             "ROI_H_RUN_ID": run_id,
             "ROI_H_IDEMPOTENCY_KEY": idempotency_key,
             "ROI_H_EXTERNAL_IO_MODE": "runtime_recorded",
-            "ROI_H_RUN_DIR": str(workspace.artifacts / run_id / "_workspace"),
-            "ROI_H_BROWSER_STATE": str(
-                workspace.artifacts / run_id / "runtime" / "browser-session.json"
-            ),
+            "ROI_H_RUN_DIR": str(paths.work),
+            "ROI_H_RUN_INPUT": str(paths.input),
+            "ROI_H_RUN_OUTPUT": str(paths.output),
+            "ROI_H_RUN_TMP": str(paths.tmp),
+            "ROI_H_BROWSER_STATE": str(paths.runtime / "browser-session.json"),
         }
     )
     names = set(skill_tool.secret_names) | secret_names_in_refs(payload)

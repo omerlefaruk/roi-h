@@ -106,42 +106,15 @@ pre-push hook to work around a failing history check.
 
 ### User-owned storage
 
-The storage seam is `resolve_home`: an explicit `--home` path wins, followed by
-`ROI_H_HOME`, followed by `~/.roi-h`. The default must never depend on the repository or
-the shell's current working directory.
+The storage seam remains `resolve_home`: an explicit `--home` path wins, followed by
+`ROI_H_HOME`, followed by `~/.roi-h`. The default never depends on the repository or the
+shell's current working directory.
 
-```text
-~/.roi-h/
-  config.json
-  skills/                         # reusable user-shared skills
-  private/                        # non-runtime research/reference material
-  projects/
-    <name>/
-      config.json
-      reference/                  # project documents and source references
-      secrets.json
-      browser-profile/
-      feedback/
-      dev/
-        rpa.sqlite
-        skills/                   # editable project skills
-        automations/              # immutable dev packages
-        artifacts/
-      prod/
-        rpa.sqlite
-        skills/
-        automations/              # immutable promoted packages
-        artifacts/
-```
-
-Skill resolution order is packaged core, user-shared, then project-local. A later scope
-may override a tool name. Frozen automation execution does not read ambient shared
-skills: every referenced non-core skill is copied into the immutable automation package
-at ship time.
-
-The operation historically called “promote to global” targets `~/.roi-h/skills`; it must
-reject the packaged core skill directory. Promotion into the generic product requires a
-normal reviewed source change, not a runtime copy.
+[`project-storage-activegraph-refactor.md`](project-storage-activegraph-refactor.md) is
+the single authority for the versioned data-home layout, project and environment
+ownership, logical paths, ActiveGraph stores, run workspaces, artifacts, packages,
+channels, secrets, diagnostics, export/import, migration, and retention. This
+distribution document intentionally does not maintain a second project-layout copy.
 
 ## User contract
 

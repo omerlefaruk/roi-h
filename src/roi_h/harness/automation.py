@@ -11,12 +11,12 @@ from typing import Any
 
 from roi_h.harness.atomicfs import (
     atomic_write_json,
-    atomic_write_text,
     package_digest,
     verify_package,
 )
 from roi_h.harness.domain import PhasePlanEntry, Recipe, parse_phase_plan
 from roi_h.harness.loader import default_skills_root, load_skills
+from roi_h.harness.logical_paths import detect_physical_paths
 from roi_h.harness.recipe import (
     load_recipe,
     recipe_from_dict,
@@ -145,6 +145,13 @@ def publish_manifest(
             if issues:
                 msg = "invalid recipe: " + "; ".join(issues)
                 raise ValueError(msg)
+            physical_paths = detect_physical_paths(resolved_recipe.model_dump(mode="json"))
+            if physical_paths:
+                msg = (
+                    "package.not_portable: recipe contains machine-specific paths; "
+                    f"first offending value: {physical_paths[0]!r}"
+                )
+                raise ValueError(msg)
             resolved_recipe = resolved_recipe.model_copy(
                 update={
                     "name": name,
@@ -167,9 +174,9 @@ def publish_manifest(
             "schema_version": 1,
             "name": name,
             "version": version,
-            "project": workspace.project,
+            "project_id": workspace.project_id,
             "goal": goal or (resolved_recipe.goal if resolved_recipe else ""),
-            "env": workspace.env,
+            "source_environment": workspace.env,
             "created_at": (
                 existing_manifest.get("created_at")
                 if existing_manifest is not None
@@ -199,7 +206,7 @@ def publish_manifest(
                 raise FileExistsError(msg)
         else:
             staging.replace(auto_dir)
-        atomic_write_text(name_dir / "LATEST", version + "\n")
+        _write_channel(workspace, name, version, manifest)
         return {
             "ok": True,
             "manifest": manifest,
@@ -223,15 +230,12 @@ def push_to_prod(
     version: str | None = None,
     overwrite_skills: bool = True,
 ) -> dict[str, Any]:
-    """Push an immutable, self-contained automation package into prod.
-
-    The package snapshot is authoritative for execution. Project skill mirrors
-    remain available for interactive operator discovery.
-    """
+    """Promote an immutable package by atomically changing the prod channel."""
+    del overwrite_skills
     dev = Workspace.open(root, project=project, env="dev")
     prod = Workspace.open(root, project=project, env="prod")
     _validate_name(name)
-    ver = version or _read_latest(dev.automations / name)
+    ver = version or _read_channel(dev, name) or _read_latest(dev.automations / name)
     if ver is None:
         msg = f"no published version for automation {name!r} in dev (run publish first)"
         raise FileNotFoundError(msg)
@@ -243,42 +247,7 @@ def push_to_prod(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     digest = verify_package(src, manifest)
 
-    dest = prod.automations / name / ver
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    if dest.exists():
-        existing_manifest = json.loads((dest / "manifest.json").read_text(encoding="utf-8"))
-        existing_digest = verify_package(dest, existing_manifest)
-        if existing_digest != digest:
-            msg = f"prod automation version is immutable: {name}@{ver}"
-            raise FileExistsError(msg)
-    else:
-        staging = Path(tempfile.mkdtemp(prefix=f".{ver}.", dir=dest.parent))
-        try:
-            shutil.rmtree(staging)
-            shutil.copytree(src, staging)
-            staging.replace(dest)
-        finally:
-            if staging.exists():
-                shutil.rmtree(staging)
-    atomic_write_text(prod.automations / name / "LATEST", ver + "\n")
-
-    skills_src = dest / "skills"
-    skill_dirs = sorted(item for item in skills_src.iterdir() if item.is_dir())
-    if not overwrite_skills:
-        conflict = next(
-            (
-                prod.project_skills / item.name
-                for item in skill_dirs
-                if (prod.project_skills / item.name).exists()
-            ),
-            None,
-        )
-        if conflict is not None:
-            msg = f"prod skill exists: {conflict} (pass overwrite)"
-            raise FileExistsError(msg)
-    for skill_dir in skill_dirs:
-        _replace_tree(skill_dir, prod.project_skills / skill_dir.name)
-    skill_copies = [item.name for item in skill_dirs]
+    _write_channel(prod, name, ver, manifest)
 
     push_record = {
         "name": name,
@@ -287,19 +256,15 @@ def push_to_prod(
         "pushed_at": datetime.now(UTC).isoformat(),
         "from_env": "dev",
         "to_env": "prod",
-        "skills": skill_copies,
-        "manifest": manifest,
         "package_digest": digest,
-        "has_recipe": (dest / "recipe.json").is_file(),
+        "has_recipe": (src / "recipe.json").is_file(),
     }
-    record_path = prod.automations / name / "pushes" / f"{ver}.json"
-    atomic_write_json(record_path, push_record)
     return {
         "ok": True,
         **push_record,
-        "prod_skills": str(prod.project_skills),
         "prod_db": str(prod.db),
-        "recipe_path": str(dest / "recipe.json") if (dest / "recipe.json").is_file() else None,
+        "channel_path": str(prod.channels / f"{name}.json"),
+        "recipe_path": str(src / "recipe.json") if (src / "recipe.json").is_file() else None,
     }
 
 
@@ -311,7 +276,7 @@ def load_automation(
 ) -> dict[str, Any]:
     """Load a published automation package (manifest + optional recipe + skills dir)."""
     _validate_name(name)
-    ver = version or _read_latest(workspace.automations / name)
+    ver = version or _read_channel(workspace, name) or _read_latest(workspace.automations / name)
     if ver is None:
         msg = f"no automation {name!r} in env {workspace.env!r}"
         raise FileNotFoundError(msg)
@@ -346,7 +311,7 @@ def list_automations(workspace: Workspace) -> list[dict[str, Any]]:
     if not workspace.automations.is_dir():
         return items
     for name_dir in sorted(p for p in workspace.automations.iterdir() if p.is_dir()):
-        latest = _read_latest(name_dir)
+        latest = _read_channel(workspace, name_dir.name) or _read_latest(name_dir)
         versions = sorted(
             p.name for p in name_dir.iterdir() if p.is_dir() and (p / "manifest.json").is_file()
         )
@@ -362,6 +327,35 @@ def list_automations(workspace: Workspace) -> list[dict[str, Any]]:
             }
         )
     return items
+
+
+def _read_channel(workspace: Workspace, name: str) -> str | None:
+    path = workspace.channels / f"{name}.json"
+    if not path.is_file():
+        return None
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    return str(raw.get("version") or "") or None
+
+
+def _write_channel(
+    workspace: Workspace,
+    name: str,
+    version: str,
+    manifest: dict[str, Any],
+) -> None:
+    workspace.channels.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(
+        workspace.channels / f"{name}.json",
+        {
+            "schema_version": 1,
+            "name": name,
+            "version": version,
+            "package_digest": manifest["package_digest"],
+            "promoted_at": datetime.now(UTC).isoformat(),
+            "source_run_id": manifest.get("source_run_id"),
+        },
+        mode=0o600,
+    )
 
 
 def _resolve_recipe(

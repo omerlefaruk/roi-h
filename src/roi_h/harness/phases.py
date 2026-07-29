@@ -8,9 +8,11 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from roi_h.harness.atomicfs import atomic_write_json
 from roi_h.harness.domain import HandoffManifest, validate_phase_name
 
 _SAFE_DIR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")
+_STORED_ARTIFACT = re.compile(r"^art_[A-Za-z0-9_-]{8,128}--(.+)$")
 
 
 def phases_root(artifacts_root: Path, run_id: str) -> Path:
@@ -55,7 +57,8 @@ def write_handoff(
         if not src.is_file():
             msg = f"phase artifact missing: {src}"
             raise FileNotFoundError(msg)
-        dest_name = src.name
+        stored_match = _STORED_ARTIFACT.fullmatch(src.name)
+        dest_name = stored_match.group(1) if stored_match else src.name
         if "/" in dest_name or "\\" in dest_name or dest_name in {".", ".."}:
             msg = f"invalid artifact name for handoff: {dest_name!r}"
             raise ValueError(msg)
@@ -76,13 +79,12 @@ def write_handoff(
         source_run_id=source_run_id,
     )
     path = package / "manifest.json"
-    path.write_text(
-        json.dumps(manifest.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_json(path, manifest.model_dump(mode="json"), mode=0o600)
+    relative = package.relative_to(artifacts_root / run_id).as_posix()
     return {
         "ok": True,
         "handoff_path": str(package.resolve()),
+        "handoff_uri": f"run-handoff://{run_id}/{relative}",
         "manifest_path": str(path.resolve()),
         "manifest": manifest.model_dump(mode="json"),
     }

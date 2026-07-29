@@ -40,6 +40,7 @@ from roi_h.harness.loader import (
     resolve_skills_root,
 )
 from roi_h.harness.records import RunRecord
+from roi_h.harness.run_storage import RunStorage
 from roi_h.harness.workspace import Workspace
 
 
@@ -91,6 +92,7 @@ class RunSession:
         tools = catalog.to_activegraph_tools()
         limits = spec.to_activegraph_limits() or None
         graph = Graph(run_id=run_id)
+        RunStorage(workspace).prepare(graph.run_id)
         invoker = IsolatedSkillInvoker(catalog, workspace)
         behaviors = (
             *build_invocation_behaviors(catalog, workspace, invoker),
@@ -127,6 +129,7 @@ class RunSession:
     ) -> RunSession:
         """Reopen a durable run and re-bind global + project skill tools."""
         spec = budget or BudgetSpec()
+        RunStorage(workspace).prepare(run_id)
         project_root = (
             Path(project_skills) if project_skills is not None else workspace.project_skills
         )
@@ -404,8 +407,8 @@ class RunSession:
             "db": str(self.workspace.db),
             "skills_root": str(self.catalog.global_root),
             "project_skills_root": str(self.workspace.project_skills),
-            "artifacts_root": str(self.workspace.artifacts / self.runtime.run_id),
-            "phases_root": str(self.workspace.artifacts / self.runtime.run_id / "phases"),
+            "artifacts_root": str(self.workspace.runs / self.runtime.run_id / "artifacts"),
+            "phases_root": str(self.workspace.runs / self.runtime.run_id / "phases"),
             "auto_approve": self.auto_approve,
             "budget": self.budget.model_dump(mode="json"),
             "runtime_budget": budget_snap,
