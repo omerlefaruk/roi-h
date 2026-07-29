@@ -664,7 +664,7 @@ def test_installed_cli_agent_acceptance_from_empty_home(  # noqa: PLR0915
     event_text = json.dumps(trace) + json.dumps(event_page)
     assert secret_value not in event_text
     for path in home.rglob("*"):
-        if not path.is_file() or path.suffix in {".sqlite", ".db", ".wal", ".shm"}:
+        if not path.is_file():
             continue
         assert secret_value.encode() not in path.read_bytes()
 
