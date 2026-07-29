@@ -1,0 +1,121 @@
+{
+  "$defs": {
+    "Effect": {
+      "description": "Operation effect classification.",
+      "enum": [
+        "read",
+        "write",
+        "destructive"
+      ],
+      "title": "Effect",
+      "type": "string"
+    },
+    "ExecutionMode": {
+      "description": "Operation completion mode.",
+      "enum": [
+        "sync",
+        "task"
+      ],
+      "title": "ExecutionMode",
+      "type": "string"
+    },
+    "Idempotency": {
+      "description": "External retry rule.",
+      "enum": [
+        "not_applicable",
+        "supported",
+        "required"
+      ],
+      "title": "Idempotency",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Public description of one catalog operation.",
+  "properties": {
+    "approval_rule": {
+      "title": "Approval Rule",
+      "type": "string"
+    },
+    "description": {
+      "title": "Description",
+      "type": "string"
+    },
+    "effect": {
+      "$ref": "#/$defs/Effect"
+    },
+    "execution_mode": {
+      "$ref": "#/$defs/ExecutionMode"
+    },
+    "filesystem_requirements": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Filesystem Requirements",
+      "type": "array"
+    },
+    "idempotency": {
+      "$ref": "#/$defs/Idempotency"
+    },
+    "input_schema": {
+      "additionalProperties": true,
+      "title": "Input Schema",
+      "type": "object"
+    },
+    "network_requirements": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Network Requirements",
+      "type": "array"
+    },
+    "operation_id": {
+      "title": "Operation Id",
+      "type": "string"
+    },
+    "output_schema": {
+      "additionalProperties": true,
+      "title": "Output Schema",
+      "type": "object"
+    },
+    "pagination": {
+      "title": "Pagination",
+      "type": "boolean"
+    },
+    "plan_rule": {
+      "title": "Plan Rule",
+      "type": "string"
+    },
+    "secret_input_paths": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Secret Input Paths",
+      "type": "array"
+    },
+    "timeout_seconds": {
+      "exclusiveMinimum": 0,
+      "title": "Timeout Seconds",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "operation_id",
+    "description",
+    "input_schema",
+    "output_schema",
+    "effect",
+    "idempotency",
+    "approval_rule",
+    "plan_rule",
+    "secret_input_paths",
+    "filesystem_requirements",
+    "network_requirements",
+    "pagination",
+    "execution_mode",
+    "timeout_seconds"
+  ],
+  "title": "OperationManifest",
+  "type": "object"
+}
