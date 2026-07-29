@@ -15,6 +15,7 @@ from activegraph import Graph, Object, Runtime
 
 from roi_h.harness import graph_access, invoke_ops, phase_machine
 from roi_h.harness import reconcile as reconcile_ops
+from roi_h.harness.activegraph_runtime import ROIHRuntime
 from roi_h.harness.adaptive import build_adaptive_behavior, run_adaptive
 from roi_h.harness.codex_provider import CodexCLIProvider
 from roi_h.harness.control import request_cancellation
@@ -98,7 +99,7 @@ class RunSession:
             *build_invocation_behaviors(catalog, workspace, invoker),
             build_adaptive_behavior(),
         )
-        runtime = Runtime(
+        runtime = ROIHRuntime(
             graph,
             persist_to=str(workspace.db),
             behaviors=behaviors,
@@ -146,7 +147,7 @@ class RunSession:
             *build_invocation_behaviors(catalog, workspace, invoker),
             build_adaptive_behavior(),
         )
-        runtime = Runtime.load(
+        runtime = ROIHRuntime.load(
             str(workspace.db),
             run_id=run_id,
             behaviors=behaviors,
@@ -156,6 +157,7 @@ class RunSession:
             native_structured_output=True,
         )
         recover_incomplete_invocations(runtime)
+        runtime.restore_rejections()
         runtime.run_until_idle()
         return cls(
             runtime=runtime,
@@ -250,6 +252,23 @@ class RunSession:
             self.workspace,
             approval_id,
             approved_by=approved_by,
+        )
+
+    def reject(
+        self,
+        approval_id: str,
+        *,
+        rejected_by: str = "user",
+        reason: str = "",
+    ) -> dict[str, Any]:
+        """Reject a pending ActiveGraph approval without running its tool."""
+        if not isinstance(self.runtime, ROIHRuntime):
+            msg = "approval rejection requires ROIHRuntime"
+            raise TypeError(msg)
+        return self.runtime.reject_approval(
+            approval_id,
+            rejected_by=rejected_by,
+            reason=reason,
         )
 
     def list_approvals(self, *, status: str = "pending") -> list[dict[str, Any]]:
