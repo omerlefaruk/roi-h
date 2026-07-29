@@ -7,13 +7,16 @@ import json
 import re
 import shutil
 import sys
+import time
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from activegraph.store.sqlite import SQLiteEventStore
 
 from roi_h.agent.cli import main as agent_main
+from roi_h.agent.contract import CommandContext, CommandRequest
+from roi_h.agent.dispatcher import Dispatcher
 from roi_h.harness import RunSession
 from roi_h.harness.automation import list_automations
 from roi_h.harness.custom import define_project_tool
@@ -587,6 +590,87 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_workspace_options(autos)
     autos.set_defaults(handler=_cmd_automations)
 
+    runs = rpa_sub.add_parser("runs", help="Find and inspect durable runs")
+    runs_sub = runs.add_subparsers(dest="runs_command", required=True)
+    runs_list = runs_sub.add_parser("list")
+    _add_workspace_options(runs_list)
+    runs_list.add_argument("--limit", type=int, default=50)
+    runs_list.add_argument("--cursor", default=None)
+    runs_list.set_defaults(handler=_cmd_runs_list)
+    runs_show = runs_sub.add_parser("show")
+    _add_workspace_options(runs_show)
+    runs_show.add_argument("run_id")
+    runs_show.set_defaults(handler=_cmd_runs_show)
+    runs_wait = runs_sub.add_parser("wait")
+    _add_workspace_options(runs_wait)
+    runs_wait.add_argument("run_id")
+    runs_wait.add_argument("--timeout", type=float, default=60)
+    runs_wait.set_defaults(handler=_cmd_runs_wait)
+    runs_cancel = runs_sub.add_parser("cancel")
+    _add_workspace_options(runs_cancel)
+    runs_cancel.add_argument("run_id")
+    runs_cancel.add_argument("--reason", default="operator requested cancellation")
+    runs_cancel.set_defaults(
+        handler=_cmd_cancel,
+        skills=None,
+        max_events=None,
+        max_tool_calls=None,
+        max_seconds=None,
+        auto_approve=None,
+    )
+
+    events = rpa_sub.add_parser("events", help="Read ordered ActiveGraph run events")
+    events_sub = events.add_subparsers(dest="events_command", required=True)
+    for command in ("list", "follow"):
+        event_parser = events_sub.add_parser(command)
+        _add_workspace_options(event_parser)
+        event_parser.add_argument("--run-id", required=True)
+        event_parser.add_argument("--after", default=None)
+        event_parser.add_argument("--limit", type=int, default=50)
+        event_parser.set_defaults(handler=_cmd_events)
+
+    trace = rpa_sub.add_parser("trace", help="Show a bounded product trace")
+    trace_sub = trace.add_subparsers(dest="trace_command", required=True)
+    trace_show = trace_sub.add_parser("show")
+    _add_workspace_options(trace_show)
+    trace_show.add_argument("--run-id", required=True)
+    trace_show.add_argument("--limit", type=int, default=200)
+    trace_show.set_defaults(handler=_cmd_trace_show)
+
+    skill = rpa_sub.add_parser("skill", help="Inspect and manage user-owned skills")
+    skill_sub = skill.add_subparsers(dest="skill_command", required=True)
+    skill_list = skill_sub.add_parser("list")
+    _add_workspace_options(skill_list)
+    _add_skills_option(skill_list)
+    skill_list.set_defaults(handler=_cmd_skill_list)
+    for command in ("show", "validate"):
+        skill_show = skill_sub.add_parser(command)
+        _add_workspace_options(skill_show)
+        _add_skills_option(skill_show)
+        skill_show.add_argument("name")
+        skill_show.set_defaults(handler=_cmd_skill_show)
+
+    automation = rpa_sub.add_parser(
+        "automation",
+        help="Inspect immutable automation packages",
+    )
+    automation_sub = automation.add_subparsers(dest="automation_command", required=True)
+    automation_list = automation_sub.add_parser("list")
+    _add_workspace_options(automation_list)
+    automation_list.set_defaults(handler=_cmd_automation_list)
+    for command in ("show", "verify"):
+        automation_show = automation_sub.add_parser(command)
+        _add_workspace_options(automation_show)
+        automation_show.add_argument("name")
+        automation_show.add_argument("--version", default=None)
+        automation_show.set_defaults(handler=_cmd_automation_show)
+    automation_compare = automation_sub.add_parser("compare")
+    _add_workspace_options(automation_compare)
+    automation_compare.add_argument("name")
+    automation_compare.add_argument("version_a")
+    automation_compare.add_argument("version_b")
+    automation_compare.set_defaults(handler=_cmd_automation_compare)
+
     return parser
 
 
@@ -979,6 +1063,121 @@ def _cmd_diagnostics_show(args: argparse.Namespace) -> dict[str, Any]:
         "diagnostics": items,
         "count": len(items),
     }
+
+
+def _operation_arguments(
+    args: argparse.Namespace,
+    **values: object,
+) -> dict[str, Any]:
+    arguments = {
+        "home": getattr(args, "home", None),
+        "project": getattr(args, "project", None),
+        "environment": getattr(args, "env", None),
+        "skills": getattr(args, "skills", None),
+        **values,
+    }
+    return {key: value for key, value in arguments.items() if value is not None}
+
+
+def _call_operation(
+    args: argparse.Namespace,
+    operation: str,
+    **values: object,
+) -> dict[str, Any]:
+    request = CommandRequest(
+        context=CommandContext(
+            project=getattr(args, "project", None),
+            environment=getattr(args, "env", None),
+            run_id=cast("str | None", values.get("run_id")),
+        ),
+        arguments=_operation_arguments(args, **values),
+    )
+    response = Dispatcher().execute(operation, request)
+    if not response.ok:
+        error = response.error
+        message = (
+            f"{error.code}: {error.message}"
+            if error is not None
+            else "operation.failed: operation failed without an error"
+        )
+        raise RuntimeError(message)
+    return {"ok": True, **(response.result or {})}
+
+
+def _cmd_runs_list(args: argparse.Namespace) -> dict[str, Any]:
+    return _call_operation(
+        args,
+        "run.list",
+        limit=args.limit,
+        cursor=args.cursor,
+    )
+
+
+def _cmd_runs_show(args: argparse.Namespace) -> dict[str, Any]:
+    return _call_operation(args, "run.show", run_id=args.run_id)
+
+
+def _cmd_runs_wait(args: argparse.Namespace) -> dict[str, Any]:
+    deadline = time.monotonic() + max(args.timeout, 0)
+    while True:
+        result = _call_operation(args, "run.show", run_id=args.run_id)
+        header = result.get("header")
+        status = header.get("status") if isinstance(header, dict) else None
+        if status in {"completed", "failed", "cancelled"}:
+            return result
+        if time.monotonic() >= deadline:
+            return {**result, "timed_out": True}
+        time.sleep(min(0.1, max(deadline - time.monotonic(), 0)))
+
+
+def _cmd_events(args: argparse.Namespace) -> dict[str, Any]:
+    return _call_operation(
+        args,
+        "run.events",
+        run_id=args.run_id,
+        after=args.after,
+        limit=args.limit,
+    )
+
+
+def _cmd_trace_show(args: argparse.Namespace) -> dict[str, Any]:
+    return _call_operation(
+        args,
+        "run.trace",
+        run_id=args.run_id,
+        limit=args.limit,
+    )
+
+
+def _cmd_skill_list(args: argparse.Namespace) -> dict[str, Any]:
+    return _call_operation(args, "skill.list")
+
+
+def _cmd_skill_show(args: argparse.Namespace) -> dict[str, Any]:
+    return _call_operation(args, f"skill.{args.skill_command}", name=args.name)
+
+
+def _cmd_automation_list(args: argparse.Namespace) -> dict[str, Any]:
+    return _call_operation(args, "automation.list")
+
+
+def _cmd_automation_show(args: argparse.Namespace) -> dict[str, Any]:
+    return _call_operation(
+        args,
+        f"automation.{args.automation_command}",
+        name=args.name,
+        version=args.version,
+    )
+
+
+def _cmd_automation_compare(args: argparse.Namespace) -> dict[str, Any]:
+    return _call_operation(
+        args,
+        "automation.compare",
+        name=args.name,
+        version_a=args.version_a,
+        version_b=args.version_b,
+    )
 
 
 def _cmd_cancel(args: argparse.Namespace) -> dict[str, Any]:

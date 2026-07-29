@@ -139,3 +139,34 @@ def test_cli_start_auto_run_id(tmp_path: Path) -> None:
     assert start.returncode == 0, start.stderr
     payload = json.loads(start.stdout)
     assert payload["run_id"]
+
+
+def test_required_human_read_command_groups(tmp_path: Path) -> None:
+    home = str(tmp_path / ".roi-h")
+    init = _roi_h("rpa", "project", "create", "demo", "--home", home, cwd=tmp_path)
+    assert init.returncode == 0, init.stderr
+    start = _roi_h(
+        "rpa",
+        "start",
+        "--home",
+        home,
+        "--run-id",
+        "human-read-run",
+        "--goal",
+        "Inspect command groups",
+        cwd=tmp_path,
+    )
+    assert start.returncode == 0, start.stderr
+
+    commands = (
+        ("runs", "list", "--home", home),
+        ("runs", "show", "human-read-run", "--home", home),
+        ("events", "list", "--run-id", "human-read-run", "--home", home),
+        ("trace", "show", "--run-id", "human-read-run", "--home", home),
+        ("skill", "list", "--home", home),
+        ("automation", "list", "--home", home),
+    )
+    for command in commands:
+        result = _roi_h("rpa", *command, cwd=tmp_path)
+        assert result.returncode == 0, (command, result.stdout, result.stderr)
+        assert json.loads(result.stdout)
