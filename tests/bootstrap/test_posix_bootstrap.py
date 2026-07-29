@@ -14,8 +14,8 @@ def test_posix_bootstrap_has_a_complete_stable_release_identity() -> None:
     script = (Path(__file__).parents[2] / "install.sh").read_text(encoding="utf-8")
 
     assert (
-        'DEFAULT_RELEASE_BUNDLE_URL="https://get.roi-h.dev/releases/stable/'
-        'roi-h-release-0.1.0.tar.gz"' in script
+        'DEFAULT_RELEASE_BUNDLE_URL="https://github.com/omerlefaruk/roi-h/releases/'
+        'download/v0.1.0/roi-h-release-0.1.0.tar.gz"' in script
     )
     assert (
         'DEFAULT_RELEASE_BUNDLE_SHA256="'
@@ -26,6 +26,33 @@ def test_posix_bootstrap_has_a_complete_stable_release_identity() -> None:
 def _write_executable(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
     path.chmod(0o755)
+
+
+def test_posix_bootstrap_rejects_an_unqualified_platform(tmp_path: Path) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_executable(
+        fake_bin / "uname",
+        """#!/bin/sh
+if [ "${1-}" = "-s" ]; then
+    printf 'Linux\n'
+else
+    printf 'x86_64\n'
+fi
+""",
+    )
+
+    completed = subprocess.run(
+        ["/bin/sh", "install.sh"],
+        cwd=Path(__file__).parents[2],
+        env={**os.environ, "PATH": f"{fake_bin}:/usr/bin:/bin"},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert "supports only macOS ARM64. Detected Linux:x86_64" in completed.stderr
 
 
 @pytest.mark.parametrize(
@@ -207,7 +234,10 @@ printf '%s  %s\n' "$digest" "$last"
     assert launcher.resolve() == install_root / "current" / "bin" / "roi-h"
     updater = install_root / "installer" / "update.sh"
     assert updater.stat().st_mode & 0o111
-    assert "https://get.roi-h.dev" in updater.read_text(encoding="utf-8")
+    assert (
+        "https://raw.githubusercontent.com/omerlefaruk/roi-h/main/install.sh"
+        in updater.read_text(encoding="utf-8")
+    )
 
 
 def test_posix_bootstrap_rejects_an_unverified_uv_installer(tmp_path: Path) -> None:

@@ -122,7 +122,12 @@ uv run python scripts/prepare_release_candidate.py \
 ```
 
 The candidate contains the application wheel, the external installer wheel, every locked
-runtime wheel, and a digest-verified release description. The public one-line command is
-enabled only after this bundle and the reviewed bootstrap are uploaded to
-`get.roi-h.dev`. Re-running that command updates a managed installation; the installed
-equivalent is `roi-h update`.
+runtime wheel, and a digest-verified release description. The macOS ARM64 one-line
+command downloads the reviewed bootstrap from GitHub:
+
+```shell
+curl -LsSf https://raw.githubusercontent.com/omerlefaruk/roi-h/main/install.sh | sh
+```
+
+The release bundle is stored as an immutable GitHub Release asset. Re-running the command
+updates a managed installation; the installed equivalent is `roi-h update`.

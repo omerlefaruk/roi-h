@@ -6,7 +6,7 @@ UV_VERSION="0.11.16"
 UV_INSTALLER_SHA256="b9f925505899533f36a3acfdf8684c661ff2d5c8735f759fca768367b5996123"
 PYTHON_VERSION="3.12.13"
 DEFAULT_INSTALLER_VERSION="0.1.0"
-DEFAULT_RELEASE_BUNDLE_URL="https://get.roi-h.dev/releases/stable/roi-h-release-0.1.0.tar.gz"
+DEFAULT_RELEASE_BUNDLE_URL="https://github.com/omerlefaruk/roi-h/releases/download/v0.1.0/roi-h-release-0.1.0.tar.gz"
 DEFAULT_RELEASE_BUNDLE_SHA256="ce2ea82cae5e43ee526ac5a437193f2c562877023699c3e860f6e56940c4cf40"
 
 fail() {
@@ -17,6 +17,15 @@ fail() {
 installer_version=${ROI_H_INSTALLER_VERSION:-$DEFAULT_INSTALLER_VERSION}
 release_bundle_url=${ROI_H_RELEASE_BUNDLE_URL:-$DEFAULT_RELEASE_BUNDLE_URL}
 release_bundle_sha256=${ROI_H_RELEASE_BUNDLE_SHA256:-$DEFAULT_RELEASE_BUNDLE_SHA256}
+
+platform=$(uname -s):$(uname -m)
+case "$platform" in
+    Darwin:arm64 | Darwin:aarch64)
+        ;;
+    *)
+        fail "ROI-H 0.1.0 supports only macOS ARM64. Detected $platform."
+        ;;
+esac
 
 case "$installer_version" in
     '' | *[!0-9A-Za-z.+-]*)
@@ -207,7 +216,7 @@ curl \
     --silent \
     --show-error \
     --output "$temporary_script" \
-    https://get.roi-h.dev
+    https://raw.githubusercontent.com/omerlefaruk/roi-h/main/install.sh
 /bin/sh "$temporary_script"
 ROI_H_UPDATER
 chmod 0755 "$temporary_updater_helper"

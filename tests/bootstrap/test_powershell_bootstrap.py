@@ -18,6 +18,7 @@ def test_powershell_bootstrap_matches_the_pinned_install_contract() -> None:
     assert "$env:ROI_H_INSTALLER_VERSION" in script
     assert "$env:ROI_H_RELEASE_BUNDLE_URL" in script
     assert "$env:ROI_H_RELEASE_BUNDLE_SHA256" in script
+    assert '"Windows is not released yet. "' in script
     assert "https://astral.sh/uv/$uvVersion/install.ps1" in script
     assert "Get-FileHash -Algorithm SHA256" in script
     assert "System.IO.Compression.ZipFile" not in script
@@ -36,5 +37,5 @@ def test_powershell_bootstrap_matches_the_pinned_install_contract() -> None:
     assert '"current\\Scripts\\roi-h.exe"' in script
     assert '"roi-h.cmd"' in script
     assert '"installer\\update.ps1"' in script
-    assert '"https://get.roi-h.dev/windows"' in script
+    assert '"https://raw.githubusercontent.com/omerlefaruk/roi-h/main/install.ps1"' in script
     assert '[Environment]::SetEnvironmentVariable("Path"' in script

@@ -22,16 +22,20 @@ ROI-H remains a Python distribution internally, published as a wheel and source
 distribution to PyPI or an approved private Python index. Normal operators must not need
 to understand Python, virtual environments, `pip`, `uv`, or Playwright.
 
-The supported installation surface is a branded, user-local bootstrap installer:
+The available macOS ARM64 installation surface is:
 
 ```shell
-curl -LsSf https://get.roi-h.dev | sh
+curl -LsSf https://raw.githubusercontent.com/omerlefaruk/roi-h/main/install.sh | sh
 ```
 
-Windows PowerShell uses an equivalent endpoint:
+GitHub Releases hosts the immutable release bundle. A branded `get.roi-h.dev` alias can
+be added later without hosting any files on an operator's computer.
+
+Windows PowerShell will use the equivalent command after its platform bundle is
+qualified:
 
 ```powershell
-irm https://get.roi-h.dev/windows | iex
+irm https://raw.githubusercontent.com/omerlefaruk/roi-h/main/install.ps1 | iex
 ```
 
 The supported update surface is:
@@ -43,10 +47,10 @@ roi-h update
 Running the original installer again must also be idempotent and update an existing
 installation.
 
-The command above becomes a real consumer command only after the qualified `install.sh`
-and its immutable release bundle are uploaded to `get.roi-h.dev`. Before that
-publication, maintainers can qualify the same path with the repository script and an
-explicit staging bundle URL and SHA-256 digest.
+The command becomes a real consumer command after the qualified `install.sh` is on
+`main` and its immutable bundle is attached to GitHub Release `v0.1.0`. Maintainers can
+qualify the same path before publication with the repository script and an explicit
+staging bundle URL and SHA-256 digest.
 
 ROI-H will not use npm as its primary package or installation mechanism. An npm wrapper
 may be considered later only if there is a demonstrated JavaScript-user requirement. It
