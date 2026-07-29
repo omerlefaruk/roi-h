@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling==1.31.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "roi-h-installer"
+version = "0.1.0"
+description = "The user-local installer and updater for ROI-H."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { file = "LICENSE" }
+authors = [{ name = "ROI-H maintainers" }]
+dependencies = ["pydantic==2.13.4"]
+
+[dependency-groups]
+dev = [
+  "build==1.5.0",
+  "mypy==2.3.0",
+  "pytest==9.1.1",
+  "ruff==0.16.0",
+  "twine==7.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/roi_h_installer"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/LICENSE",
+  "/README.md",
+  "/pyproject.toml",
+  "/src/roi_h_installer",
+]
+
+[tool.pytest.ini_options]
+addopts = ["--strict-config", "--strict-markers", "-ra"]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = ["COM812", "CPY001", "D203", "D213"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["ANN", "D", "S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["roi_h_installer"]
+mypy_path = "src"
+warn_unreachable = true

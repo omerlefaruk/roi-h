@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 
 REPOSITORY = Path(__file__).resolve().parents[1]
+INSTALLER_PROJECT = REPOSITORY / "packages" / "roi-h-installer"
+INSTALLER_DISTRIBUTION = REPOSITORY / "dist" / "installer"
 PYTHON_VERSION = "3.12"
 EXPECTED_ARTIFACT_COUNT = 2
 
@@ -24,9 +26,10 @@ def _uv_run(python_version: str, *command: str) -> None:
     _run(["uv", "run", "--python", python_version, "--no-sync", *command])
 
 
-def _distribution_artifacts() -> list[str]:
-    """Return the newly built wheel and source distribution."""
-    distribution_directory = REPOSITORY / "dist"
+def _distribution_artifacts(
+    distribution_directory: Path = REPOSITORY / "dist",
+) -> list[str]:
+    """Return one newly built wheel and source distribution."""
     artifacts = sorted(
         path
         for path in distribution_directory.iterdir()
@@ -43,6 +46,19 @@ def main() -> int:
     """Qualify the supported Python runtime and build release artifacts once."""
     _run([sys.executable, "scripts/check_publication_boundary.py"])
     _run(["uv", "sync", "--locked", "--python", PYTHON_VERSION, "--group", "dev"])
+    _run(
+        [
+            "uv",
+            "sync",
+            "--directory",
+            str(INSTALLER_PROJECT),
+            "--locked",
+            "--python",
+            PYTHON_VERSION,
+            "--group",
+            "dev",
+        ],
+    )
     _uv_run(
         PYTHON_VERSION,
         "python",
@@ -57,8 +73,107 @@ def main() -> int:
     _uv_run(PYTHON_VERSION, "ruff", "format", "--check", ".")
     _uv_run(PYTHON_VERSION, "mypy")
     _uv_run(PYTHON_VERSION, "python", "-m", "pytest")
+    _run(
+        [
+            "uv",
+            "run",
+            "--directory",
+            str(INSTALLER_PROJECT),
+            "--python",
+            PYTHON_VERSION,
+            "--no-sync",
+            "ruff",
+            "check",
+            ".",
+        ],
+    )
+    _run(
+        [
+            "uv",
+            "run",
+            "--directory",
+            str(INSTALLER_PROJECT),
+            "--python",
+            PYTHON_VERSION,
+            "--no-sync",
+            "ruff",
+            "format",
+            "--check",
+            ".",
+        ],
+    )
+    _run(
+        [
+            "uv",
+            "run",
+            "--directory",
+            str(INSTALLER_PROJECT),
+            "--python",
+            PYTHON_VERSION,
+            "--no-sync",
+            "mypy",
+        ],
+    )
+    _run(
+        [
+            "uv",
+            "run",
+            "--directory",
+            str(INSTALLER_PROJECT),
+            "--python",
+            PYTHON_VERSION,
+            "--no-sync",
+            "python",
+            "-m",
+            "pytest",
+        ],
+    )
     _run(["uv", "build", "--python", PYTHON_VERSION, "--clear", "--no-sources"])
+    _run(
+        [
+            "uv",
+            "build",
+            "--directory",
+            str(INSTALLER_PROJECT),
+            "--python",
+            PYTHON_VERSION,
+            "--clear",
+            "--no-sources",
+            "--out-dir",
+            str(INSTALLER_DISTRIBUTION),
+        ],
+    )
+    _run(
+        [
+            sys.executable,
+            "scripts/check_release_identity.py",
+            "--project",
+            "pyproject.toml",
+            *[item for artifact in _distribution_artifacts() for item in ("--artifact", artifact)],
+        ],
+    )
+    _run(
+        [
+            sys.executable,
+            "scripts/check_release_identity.py",
+            "--project",
+            str(INSTALLER_PROJECT / "pyproject.toml"),
+            *[
+                item
+                for artifact in _distribution_artifacts(INSTALLER_DISTRIBUTION)
+                for item in ("--artifact", artifact)
+            ],
+        ],
+    )
     _uv_run(PYTHON_VERSION, "python", "-m", "twine", "check", *_distribution_artifacts())
+    _uv_run(
+        PYTHON_VERSION,
+        "python",
+        "-m",
+        "twine",
+        "check",
+        *_distribution_artifacts(INSTALLER_DISTRIBUTION),
+    )
     sys.stdout.write("\nROI-H release qualification: PASSED\n")
     return 0
 
