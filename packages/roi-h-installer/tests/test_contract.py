@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+import roi_h_installer.core as installer_core
 from roi_h_installer import (
     DataState,
     EffectKind,
@@ -26,6 +27,11 @@ from roi_h_installer import (
 )
 
 _TEST_VERSION = "0.1.0"
+_ACTIVE_DOCTOR_CALL = 3
+
+
+class _SimulatedDoctorError(RuntimeError):
+    pass
 
 
 def _build_test_roi_h_wheel(
@@ -732,3 +738,93 @@ def test_post_activation_doctor_failure_restores_previous_pointer_and_state(
     saved_record = json.loads(record.read_text(encoding="utf-8"))
     assert saved_record["status"] == "failed"
     assert saved_record["failure"]["code"] == "doctor.failed"
+
+
+def test_windows_install_uses_an_atomic_pointer_file_without_symlinks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_root = tmp_path / "install"
+    data_home = tmp_path / "data"
+    install_request, _ = _make_release_request(
+        tmp_path,
+        install_root,
+        data_home,
+        version="0.1.0",
+        operation=InstallOperation.INSTALL,
+        request_id="windows_install",
+    )
+
+    def create_environment(environment: Path) -> None:
+        scripts = environment / "Scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "roi-h.exe").write_bytes(b"test")
+
+    monkeypatch.setattr(installer_core, "_is_windows", lambda: True)
+    monkeypatch.setattr(installer_core, "_create_environment", create_environment)
+    monkeypatch.setattr(installer_core, "_install_wheelhouse", lambda *_args: None)
+    monkeypatch.setattr(installer_core, "_install_browser", lambda *_args: None)
+    monkeypatch.setattr(installer_core, "_run_staged_doctor", lambda *_args: None)
+
+    result = apply(plan(install_request))
+
+    pointer = install_root / "current"
+    assert result.pointer_state is PointerState.ACTIVE
+    assert pointer.is_file()
+    assert not pointer.is_symlink()
+    assert pointer.read_text(encoding="ascii") == "0.1.0\n"
+    assert (install_root / "versions" / "0.1.0" / "Scripts" / "roi-h.exe").is_file()
+    assert not (install_root / "transactions" / f"{result.transaction_id}.staging").exists()
+
+
+def test_windows_update_failure_restores_pointer_file_and_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_root = tmp_path / "install"
+    data_home = tmp_path / "data"
+
+    def create_environment(environment: Path) -> None:
+        (environment / "Scripts").mkdir(parents=True)
+
+    monkeypatch.setattr(installer_core, "_is_windows", lambda: True)
+    monkeypatch.setattr(installer_core, "_create_environment", create_environment)
+    monkeypatch.setattr(installer_core, "_install_wheelhouse", lambda *_args: None)
+    monkeypatch.setattr(installer_core, "_install_browser", lambda *_args: None)
+    monkeypatch.setattr(installer_core, "_run_staged_doctor", lambda *_args: None)
+    install_request, _ = _make_release_request(
+        tmp_path,
+        install_root,
+        data_home,
+        version="0.1.0",
+        operation=InstallOperation.INSTALL,
+        request_id="windows_before_failed_update",
+    )
+    apply(plan(install_request))
+    previous_state = (install_root / "install-state.json").read_bytes()
+    update_request, _ = _make_release_request(
+        tmp_path,
+        install_root,
+        data_home,
+        version="0.2.0",
+        operation=InstallOperation.UPDATE,
+        request_id="windows_failed_update",
+    )
+    update_plan = plan(update_request)
+    doctor_calls = 0
+
+    def fail_after_activation(*_args: object) -> None:
+        nonlocal doctor_calls
+        doctor_calls += 1
+        if doctor_calls == _ACTIVE_DOCTOR_CALL:
+            raise _SimulatedDoctorError
+
+    monkeypatch.setattr(installer_core, "_run_staged_doctor", fail_after_activation)
+
+    with pytest.raises(InstallerError) as captured:
+        apply(update_plan)
+
+    assert captured.value.failure.code is InstallerErrorCode.UPDATE_ACTIVATION_FAILED
+    assert (install_root / "current").read_text(encoding="ascii") == "0.1.0\n"
+    assert (install_root / "install-state.json").read_bytes() == previous_state
+    assert not (install_root / "versions" / "0.2.0").exists()

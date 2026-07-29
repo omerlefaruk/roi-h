@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -35,6 +36,7 @@ from roi_h_installer.models import (
 )
 
 _DIGEST_SIZE = 16
+_VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$")
 
 
 @dataclass(frozen=True)
@@ -52,6 +54,7 @@ class _TransactionPaths:
 @dataclass(frozen=True)
 class _PreviousActivation:
     pointer_target: Path | None
+    pointer_bytes: bytes | None
     state_bytes: bytes | None
 
 
@@ -101,6 +104,26 @@ def _data_home() -> Path:
     return (Path.home() / ".roi-h").resolve()
 
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
+def _resolve_pointer(install_root: Path, pointer: Path) -> Path | None:
+    if _is_windows():
+        if not pointer.is_file():
+            return None
+        try:
+            version = pointer.read_text(encoding="ascii").strip()
+        except (OSError, UnicodeDecodeError):
+            return None
+        if _VERSION_PATTERN.fullmatch(version) is None:
+            return None
+        return install_root / "versions" / version
+    if pointer.exists() or pointer.is_symlink():
+        return pointer.resolve()
+    return None
+
+
 def _inspect_at(install_root: Path, data_home: Path) -> InstallationState:
     versions_root = install_root / "versions"
     installed_versions = (
@@ -109,12 +132,13 @@ def _inspect_at(install_root: Path, data_home: Path) -> InstallationState:
         else ()
     )
     pointer = install_root / "current"
+    pointer_target = _resolve_pointer(install_root, pointer)
     if not pointer.exists() and not pointer.is_symlink():
         pointer_state = PointerState.MISSING
         active_version = None
-    elif pointer.exists():
+    elif pointer_target is not None and pointer_target.is_dir():
         pointer_state = PointerState.ACTIVE
-        active_version = pointer.resolve().name
+        active_version = pointer_target.name
     else:
         pointer_state = PointerState.BROKEN
         active_version = None
@@ -437,20 +461,21 @@ def _execute_initial_install(
     paths.staging_root.mkdir()
     targets = _verify_local_targets(install_plan)
     _assert_python_version(install_plan)
-    _create_environment(paths.staged_environment)
-    _install_wheelhouse(paths.staged_environment, install_plan, targets)
-    _install_browser(paths.staged_environment, install_plan)
-    _run_staged_doctor(paths.staged_environment, install_plan)
-
     paths.final_environment.parent.mkdir(parents=True, exist_ok=True)
     _assert_final_version_missing(paths.final_environment)
-    paths.staged_environment.replace(paths.final_environment)
+    working_environment = paths.final_environment if _is_windows() else paths.staged_environment
+    _create_environment(working_environment)
+    _install_wheelhouse(working_environment, install_plan, targets)
+    _install_browser(working_environment, install_plan)
+    _run_staged_doctor(working_environment, install_plan)
+
+    if not _is_windows():
+        paths.staged_environment.replace(paths.final_environment)
+        _relocate_environment_scripts(paths.staged_environment, paths.final_environment)
     shutil.rmtree(paths.staging_root)
-    _relocate_environment_scripts(paths.staged_environment, paths.final_environment)
     _run_staged_doctor(paths.final_environment, install_plan)
 
-    paths.temporary_pointer.symlink_to(paths.final_environment, target_is_directory=True)
-    paths.temporary_pointer.replace(paths.pointer)
+    _activate_pointer(paths, install_plan.requested_version)
     _write_json_atomic(
         paths.state_file,
         {
@@ -467,7 +492,8 @@ def _execute_initial_install(
             ],
         },
     )
-    _run_staged_doctor(paths.pointer, install_plan)
+    active_environment = paths.final_environment if _is_windows() else paths.pointer
+    _run_staged_doctor(active_environment, install_plan)
     _write_json_atomic(
         paths.record_file,
         {
@@ -492,9 +518,18 @@ def _assert_final_version_missing(final_environment: Path) -> None:
 
 
 def _capture_previous_activation(paths: _TransactionPaths) -> _PreviousActivation:
-    pointer_target = paths.pointer.resolve() if paths.pointer.is_symlink() else None
+    pointer_target = (
+        paths.pointer.resolve() if not _is_windows() and paths.pointer.is_symlink() else None
+    )
+    pointer_bytes = (
+        paths.pointer.read_bytes() if _is_windows() and paths.pointer.is_file() else None
+    )
     state_bytes = paths.state_file.read_bytes() if paths.state_file.is_file() else None
-    return _PreviousActivation(pointer_target=pointer_target, state_bytes=state_bytes)
+    return _PreviousActivation(
+        pointer_target=pointer_target,
+        pointer_bytes=pointer_bytes,
+        state_bytes=state_bytes,
+    )
 
 
 def _write_bytes_atomic(path: Path, value: bytes) -> None:
@@ -503,11 +538,25 @@ def _write_bytes_atomic(path: Path, value: bytes) -> None:
     temporary.replace(path)
 
 
+def _activate_pointer(paths: _TransactionPaths, version: str) -> None:
+    paths.temporary_pointer.unlink(missing_ok=True)
+    if _is_windows():
+        paths.temporary_pointer.write_text(f"{version}\n", encoding="ascii")
+    else:
+        paths.temporary_pointer.symlink_to(paths.final_environment, target_is_directory=True)
+    paths.temporary_pointer.replace(paths.pointer)
+
+
 def _restore_previous_install(
     paths: _TransactionPaths,
     previous: _PreviousActivation,
 ) -> None:
-    if paths.pointer.is_symlink() and paths.pointer.resolve() == paths.final_environment:
+    if _is_windows():
+        if previous.pointer_bytes is None:
+            paths.pointer.unlink(missing_ok=True)
+        else:
+            _write_bytes_atomic(paths.pointer, previous.pointer_bytes)
+    elif paths.pointer.is_symlink() and paths.pointer.resolve() == paths.final_environment:
         if previous.pointer_target is None:
             paths.pointer.unlink(missing_ok=True)
         else:
@@ -594,7 +643,7 @@ def _assert_python_version(install_plan: InstallPlan) -> None:
 
 def _create_environment(staged_environment: Path) -> None:
     try:
-        venv.EnvBuilder(with_pip=True, symlinks=os.name != "nt").create(staged_environment)
+        venv.EnvBuilder(with_pip=True, symlinks=not _is_windows()).create(staged_environment)
     except Exception as exc:
         raise _fail(
             InstallerErrorCode.ENVIRONMENT_CREATE_FAILED,
@@ -606,25 +655,25 @@ def _create_environment(staged_environment: Path) -> None:
 
 
 def _environment_python(environment: Path) -> Path:
-    if os.name == "nt":
+    if _is_windows():
         return environment / "Scripts" / "python.exe"
     return environment / "bin" / "python"
 
 
 def _environment_cli(environment: Path) -> Path:
-    if os.name == "nt":
+    if _is_windows():
         return environment / "Scripts" / "roi-h.exe"
     return environment / "bin" / "roi-h"
 
 
 def _environment_playwright(environment: Path) -> Path:
-    if os.name == "nt":
+    if _is_windows():
         return environment / "Scripts" / "playwright.exe"
     return environment / "bin" / "playwright"
 
 
 def _relocate_environment_scripts(previous: Path, current: Path) -> None:
-    if os.name == "nt":
+    if _is_windows():
         return
     scripts = current / "bin"
     previous_bytes = str(previous).encode()

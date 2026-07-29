@@ -1,8 +1,7 @@
 # ROI-H Distribution, Installation, and Updates
 
-**Status:** Local installer, managed update, bootstrap, and release-candidate tooling
-implemented; public hosting, signed channel metadata, and cross-platform qualification
-pending
+**Status:** Public macOS ARM64 and Windows x86-64 installer paths implemented; native
+Windows acceptance and signed channel metadata pending
 **Audience:** Release engineers and implementation agents
 **Last updated:** 2026-07-29
 
@@ -31,8 +30,7 @@ curl -LsSf https://raw.githubusercontent.com/omerlefaruk/roi-h/main/install.sh |
 GitHub Releases hosts the immutable release bundle. A branded `get.roi-h.dev` alias can
 be added later without hosting any files on an operator's computer.
 
-Windows PowerShell will use the equivalent command after its platform bundle is
-qualified:
+Windows 11 x86-64 uses the equivalent user-local PowerShell command:
 
 ```powershell
 irm https://raw.githubusercontent.com/omerlefaruk/roi-h/main/install.ps1 | iex
@@ -47,10 +45,11 @@ roi-h update
 Running the original installer again must also be idempotent and update an existing
 installation.
 
-The command becomes a real consumer command after the qualified `install.sh` is on
-`main` and its immutable bundle is attached to GitHub Release `v0.1.0`. Maintainers can
-qualify the same path before publication with the repository script and an explicit
-staging bundle URL and SHA-256 digest.
+The commands become consumer commands after the bootstraps are on `main` and their
+immutable platform bundles are attached to GitHub Release `v0.1.1`. The Windows
+wheelhouse is resolved for CPython 3.12 on `win_amd64`; it is separate from the macOS
+wheelhouse. Native Windows install, Chromium launch, and update acceptance remain a
+release-evidence requirement before maintainers describe Windows as fully qualified.
 
 ROI-H will not use npm as its primary package or installation mechanism. An npm wrapper
 may be considered later only if there is a demonstrated JavaScript-user requirement. It

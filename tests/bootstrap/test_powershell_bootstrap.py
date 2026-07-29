@@ -10,15 +10,16 @@ def test_powershell_bootstrap_matches_the_pinned_install_contract() -> None:
         in script
     )
     assert '$pythonVersion = "3.12.13"' in script
-    assert '$defaultInstallerVersion = "0.1.0"' in script
+    assert '$defaultInstallerVersion = "0.1.1"' in script
+    assert "roi-h-release-windows-x86_64-0.1.1.tar.gz" in script
     assert (
         "$defaultReleaseBundleSha256 = "
-        '"ce2ea82cae5e43ee526ac5a437193f2c562877023699c3e860f6e56940c4cf40"' in script
+        '"bc5b7af6a142f34fb176121c5d50b5cb281611623d6471e2386c3d86e507c62b"' in script
     )
     assert "$env:ROI_H_INSTALLER_VERSION" in script
     assert "$env:ROI_H_RELEASE_BUNDLE_URL" in script
     assert "$env:ROI_H_RELEASE_BUNDLE_SHA256" in script
-    assert '"Windows is not released yet. "' in script
+    assert '"This release supports Windows x86-64 only."' in script
     assert "https://astral.sh/uv/$uvVersion/install.ps1" in script
     assert "Get-FileHash -Algorithm SHA256" in script
     assert "System.IO.Compression.ZipFile" not in script
@@ -34,7 +35,8 @@ def test_powershell_bootstrap_matches_the_pinned_install_contract() -> None:
     assert "--data-home" in script
     assert "--output json" in script
     assert "$env:ROI_H_HOME =" not in script
-    assert '"current\\Scripts\\roi-h.exe"' in script
+    assert '"versions\\" + $installState.active_version' in script
+    assert 'set /p "ROI_H_ACTIVE_VERSION="<"%ROI_H_INSTALL_ROOT%\\current"' in script
     assert '"roi-h.cmd"' in script
     assert '"installer\\update.ps1"' in script
     assert '"https://raw.githubusercontent.com/omerlefaruk/roi-h/main/install.ps1"' in script

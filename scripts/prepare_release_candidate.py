@@ -13,6 +13,12 @@ from pathlib import Path
 from build_release_bundle import ReleaseBundleRequest, build_release_bundle
 
 _PIP_VERSION = "26.0.1"
+_PLATFORM_DOWNLOAD_OPTIONS = {
+    "x86_64-pc-windows-msvc": (
+        "windows-x86_64",
+        ("--platform", "win_amd64", "--implementation", "cp", "--abi", "cp312"),
+    ),
+}
 
 
 class CandidateError(RuntimeError):
@@ -36,6 +42,7 @@ class CandidateRequest:
     browser_revision: str
     activegraph_version: str
     channel: str
+    python_platform: str | None = None
 
 
 def _run(command: list[str], repository: Path) -> None:
@@ -59,23 +66,59 @@ def prepare_candidate(request: CandidateRequest) -> dict[str, object]:
 
     wheelhouse = request.output_dir / "wheelhouse"
     runtime_lock = request.output_dir / "runtime.lock"
-    bundle = request.output_dir / f"roi-h-release-{request.version}.tar.gz"
+    platform_options = (
+        _PLATFORM_DOWNLOAD_OPTIONS.get(request.python_platform)
+        if request.python_platform is not None
+        else None
+    )
+    if request.python_platform is not None and platform_options is None:
+        code = "release.platform_unsupported"
+        raise CandidateError(code, f"Unsupported Python platform: {request.python_platform}")
+    platform_label = platform_options[0] if platform_options is not None else None
+    bundle_stem = (
+        f"roi-h-release-{platform_label}-{request.version}"
+        if platform_label is not None
+        else f"roi-h-release-{request.version}"
+    )
+    bundle = request.output_dir / f"{bundle_stem}.tar.gz"
     wheelhouse.mkdir(parents=True)
     try:
-        _run(
-            [
-                "uv",
-                "export",
-                "--frozen",
-                "--no-dev",
-                "--no-emit-project",
-                "--no-annotate",
-                "--no-header",
-                "--output-file",
-                str(runtime_lock),
-            ],
-            request.repository,
-        )
+        if request.python_platform is None:
+            _run(
+                [
+                    "uv",
+                    "export",
+                    "--frozen",
+                    "--no-dev",
+                    "--no-emit-project",
+                    "--no-annotate",
+                    "--no-header",
+                    "--output-file",
+                    str(runtime_lock),
+                ],
+                request.repository,
+            )
+        else:
+            _run(
+                [
+                    "uv",
+                    "pip",
+                    "compile",
+                    "pyproject.toml",
+                    "--python-platform",
+                    request.python_platform,
+                    "--python-version",
+                    request.python_version,
+                    "--generate-hashes",
+                    "--only-binary",
+                    ":all:",
+                    "--no-annotate",
+                    "--no-header",
+                    "--output-file",
+                    str(runtime_lock),
+                ],
+                request.repository,
+            )
         _run(
             [
                 "uv",
@@ -100,6 +143,10 @@ def prepare_candidate(request: CandidateRequest) -> dict[str, object]:
             ],
             request.repository,
         )
+        download_options = list(platform_options[1]) if platform_options is not None else []
+        if platform_options is not None:
+            major, minor, *_ = request.python_version.split(".")
+            download_options.extend(("--python-version", f"{major}.{minor}"))
         _run(
             [
                 "uvx",
@@ -111,6 +158,7 @@ def prepare_candidate(request: CandidateRequest) -> dict[str, object]:
                 "download",
                 "--require-hashes",
                 "--only-binary=:all:",
+                *download_options,
                 "--dest",
                 str(wheelhouse),
                 "--requirement",
@@ -145,6 +193,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--browser-revision", required=True)
     parser.add_argument("--activegraph-version", required=True)
     parser.add_argument("--channel", required=True)
+    parser.add_argument(
+        "--python-platform",
+        choices=sorted(_PLATFORM_DOWNLOAD_OPTIONS),
+        default=None,
+    )
     return parser
 
 
@@ -162,6 +215,7 @@ def main() -> int:
                 browser_revision=args.browser_revision,
                 activegraph_version=args.activegraph_version,
                 channel=args.channel,
+                python_platform=args.python_platform,
             )
         )
     except (CandidateError, OSError, subprocess.CalledProcessError) as exc:

@@ -113,8 +113,8 @@ Build one self-contained macOS ARM64 candidate from the locked Python 3.12 envir
 uv run python scripts/prepare_release_candidate.py \
   --repository "$PWD" \
   --output-dir /tmp/roi-h-candidate \
-  --version 0.1.0 \
-  --installer-version 0.1.0 \
+  --version 0.1.1 \
+  --installer-version 0.1.1 \
   --python-version 3.12.13 \
   --browser-revision chromium-1228 \
   --activegraph-version 1.10.0 \
@@ -127,6 +127,12 @@ command downloads the reviewed bootstrap from GitHub:
 
 ```shell
 curl -LsSf https://raw.githubusercontent.com/omerlefaruk/roi-h/main/install.sh | sh
+```
+
+Windows 11 x86-64 uses PowerShell and does not require administrator access:
+
+```powershell
+irm https://raw.githubusercontent.com/omerlefaruk/roi-h/main/install.ps1 | iex
 ```
 
 The release bundle is stored as an immutable GitHub Release asset. Re-running the command

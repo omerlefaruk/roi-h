@@ -42,6 +42,21 @@ case "$command" in
         done
         printf 'dependency==4.5.6 --hash=sha256:abc\n' > "$output"
         ;;
+    pip)
+        subcommand=$1
+        shift
+        [ "$subcommand" = "compile" ]
+        output=
+        while [ "$#" -gt 0 ]; do
+            if [ "$1" = "--output-file" ]; then
+                output=$2
+                shift 2
+            else
+                shift
+            fi
+        done
+        printf 'dependency==4.5.6 --hash=sha256:abc\n' > "$output"
+        ;;
     build)
         output=
         directory=
@@ -142,6 +157,50 @@ printf 'dependency-wheel' > "$destination/dependency-4.5.6-py3-none-any.whl"
     assert "uv:build --directory " in log
     assert "packages/roi-h-installer --wheel --no-sources --out-dir" in log
     assert "uvx:--python 3.12.13 --from pip==26.0.1 pip download --require-hashes" in log
+
+    windows_output = tmp_path / "windows-candidate"
+    windows_completed = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            str(PREPARER),
+            "--repository",
+            str(REPOSITORY_ROOT),
+            "--output-dir",
+            str(windows_output),
+            "--version",
+            "1.2.3",
+            "--installer-version",
+            "0.4.0",
+            "--python-version",
+            "3.12.13",
+            "--python-platform",
+            "x86_64-pc-windows-msvc",
+            "--browser-revision",
+            "chromium-1234",
+            "--activegraph-version",
+            "1.10.0",
+            "--channel",
+            "stable",
+        ],
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert windows_completed.returncode == 0, windows_completed.stderr
+    windows_result = json.loads(windows_completed.stdout)
+    assert Path(windows_result["bundle"]) == (
+        windows_output / "roi-h-release-windows-x86_64-1.2.3.tar.gz"
+    )
+    windows_log = command_log.read_text(encoding="utf-8")
+    assert (
+        "uv:pip compile pyproject.toml --python-platform x86_64-pc-windows-msvc "
+        "--python-version 3.12.13 --generate-hashes" in windows_log
+    )
+    assert "--platform win_amd64 --implementation cp --abi cp312 --python-version 3.12" in (
+        windows_log
+    )
 
 
 def test_preparer_refuses_to_replace_a_candidate(tmp_path: Path) -> None:

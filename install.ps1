@@ -7,9 +7,9 @@ Set-StrictMode -Version Latest
 $uvVersion = "0.11.16"
 $uvInstallerSha256 = "a885d46d3105506fdabc1febd2673313968605c8434e17e5841750cb20b28989"
 $pythonVersion = "3.12.13"
-$defaultInstallerVersion = "0.1.0"
-$defaultReleaseBundleUrl = "https://github.com/omerlefaruk/roi-h/releases/download/v0.1.0/roi-h-release-0.1.0.tar.gz"
-$defaultReleaseBundleSha256 = "ce2ea82cae5e43ee526ac5a437193f2c562877023699c3e860f6e56940c4cf40"
+$defaultInstallerVersion = "0.1.1"
+$defaultReleaseBundleUrl = "https://github.com/omerlefaruk/roi-h/releases/download/v0.1.1/roi-h-release-windows-x86_64-0.1.1.tar.gz"
+$defaultReleaseBundleSha256 = "bc5b7af6a142f34fb176121c5d50b5cb281611623d6471e2386c3d86e507c62b"
 
 function Stop-Install {
     param([Parameter(Mandatory = $true)][string]$Message)
@@ -17,14 +17,14 @@ function Stop-Install {
     throw "ROI-H install failed: $Message"
 }
 
-if (
-    [string]::IsNullOrWhiteSpace($env:ROI_H_RELEASE_BUNDLE_URL) -or
-    [string]::IsNullOrWhiteSpace($env:ROI_H_RELEASE_BUNDLE_SHA256)
-) {
-    Stop-Install (
-        "Windows is not released yet. " +
-        "A staging bundle URL and SHA-256 digest are required."
-    )
+if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+    Stop-Install "This bootstrap requires Windows."
+}
+$operatingSystemArchitecture = (
+    [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+)
+if ($operatingSystemArchitecture -ne "X64") {
+    Stop-Install "This release supports Windows x86-64 only."
 }
 
 $installerVersion = if (
@@ -251,18 +251,42 @@ try {
         -Encoding UTF8 `
         -Value $updaterContent
 
-    $activeCli = Join-Path $installRoot "current\Scripts\roi-h.exe"
+    $installStatePath = Join-Path $installRoot "install-state.json"
+    $installState = Get-Content -Raw -LiteralPath $installStatePath | ConvertFrom-Json
+    if (
+        [string]::IsNullOrWhiteSpace($installState.active_version) -or
+        $installState.active_version -notmatch "^[0-9A-Za-z.+-]+$"
+    ) {
+        Stop-Install "The active ROI-H version is invalid."
+    }
+    $activeCli = Join-Path (
+        Join-Path $installRoot ("versions\" + $installState.active_version)
+    ) "Scripts\roi-h.exe"
     if (-not (Test-Path -LiteralPath $activeCli -PathType Leaf)) {
         Stop-Install "The active ROI-H command is not executable."
     }
     $binRoot = Join-Path $installRoot "bin"
     $null = New-Item -ItemType Directory -Path $binRoot -Force
     $launcher = Join-Path $binRoot "roi-h.cmd"
+    $launcherDataHome = $dataHome.Replace("%", "%%")
+    $launcherContent = @"
+@echo off
+setlocal
+for %%I in ("%~dp0..") do set "ROI_H_INSTALL_ROOT=%%~fI"
+if not defined ROI_H_HOME set "ROI_H_HOME=$launcherDataHome"
+set /p "ROI_H_ACTIVE_VERSION="<"%ROI_H_INSTALL_ROOT%\current"
+if not defined ROI_H_ACTIVE_VERSION (
+  1>&2 echo ROI-H failed: the active version pointer is empty.
+  exit /b 1
+)
+"%ROI_H_INSTALL_ROOT%\versions\%ROI_H_ACTIVE_VERSION%\Scripts\roi-h.exe" %*
+exit /b %ERRORLEVEL%
+"@
     Set-Content `
         -LiteralPath $launcher `
         -Encoding Ascii `
         -NoNewline `
-        -Value "@`"$activeCli`" %*`r`n"
+        -Value $launcherContent
 
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
     $pathEntries = @(
@@ -276,7 +300,13 @@ try {
             "$userPath;$binRoot"
         }
         [Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
-        Write-Warning "Open a new terminal before you run roi-h."
+    }
+    $processPathEntries = @(
+        ($env:Path -split ";") |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+    if ($processPathEntries -notcontains $binRoot) {
+        $env:Path = "$binRoot;$env:Path"
     }
 } finally {
     foreach ($name in $managedEnvironmentNames) {
