@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from roi_h.agent.catalog import OperationCatalog, build_catalog
@@ -12,6 +15,11 @@ from roi_h.agent.contract import (
     Effect,
     StructuredError,
 )
+from roi_h.harness.atomicfs import atomic_write_json
+from roi_h.harness.workspace import resolve_home
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class Dispatcher:
@@ -50,6 +58,33 @@ class Dispatcher:
         request_id = _request_id(request.request_id)
         try:
             manifest = self.catalog.describe(operation_id)[0]
+            if manifest.idempotency.value == "required" and not request.idempotency_key:
+                return _failure(
+                    operation_id,
+                    request_id,
+                    "request.invalid",
+                    "invalid_request",
+                    "idempotency_key is required for this operation",
+                )
+            replay = _idempotency_replay(operation_id, request)
+            if replay is not None:
+                if replay.get("fingerprint") != _request_fingerprint(operation_id, request):
+                    return _failure(
+                        operation_id,
+                        request_id,
+                        "request.idempotency_conflict",
+                        "conflict",
+                        "The idempotency key was already used with different arguments.",
+                    )
+                return CommandResult(
+                    operation=operation_id,
+                    request_id=request_id,
+                    ok=True,
+                    changed=bool(replay["changed"]),
+                    context=CommandContext.model_validate(replay["context"]),
+                    result=dict(replay["result"]),
+                    warnings=["Returned the first result for this idempotency key."],
+                )
             result = self.catalog.execute(operation_id, request)
         except KeyError as exc:
             return _failure(
@@ -61,7 +96,7 @@ class Dispatcher:
             )
         except (FileNotFoundError, ValueError, TypeError, RuntimeError, OSError) as exc:
             return _mapped_failure(operation_id, request_id, exc)
-        return CommandResult(
+        response = CommandResult(
             operation=operation_id,
             request_id=request_id,
             ok=True,
@@ -73,6 +108,8 @@ class Dispatcher:
             ),
             result=result,
         )
+        _save_idempotency(operation_id, request, response)
+        return response
 
 
 def invalid_request_result(
@@ -131,6 +168,60 @@ def _failure(
 
 def _request_id(value: str | None) -> str:
     return value or f"req_{uuid4().hex}"
+
+
+def _idempotency_replay(
+    operation_id: str,
+    request: CommandRequest,
+) -> dict[str, Any] | None:
+    path = _idempotency_path(operation_id, request)
+    if path is None or not path.is_file():
+        return None
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    return raw if isinstance(raw, dict) else None
+
+
+def _save_idempotency(
+    operation_id: str,
+    request: CommandRequest,
+    result: CommandResult,
+) -> None:
+    path = _idempotency_path(operation_id, request)
+    if path is None or result.result is None:
+        return
+    atomic_write_json(
+        path,
+        {
+            "operation": operation_id,
+            "fingerprint": _request_fingerprint(operation_id, request),
+            "changed": result.changed,
+            "context": result.context.model_dump(mode="json"),
+            "result": result.result,
+        },
+        mode=0o600,
+    )
+
+
+def _idempotency_path(operation_id: str, request: CommandRequest) -> Path | None:
+    key = request.idempotency_key
+    if not key or operation_id == "secret.set":
+        return None
+    home = resolve_home(request.arguments.get("home"))
+    token = hashlib.sha256(key.encode()).hexdigest()
+    return home / "runtime" / "agent-idempotency" / f"{token}.json"
+
+
+def _request_fingerprint(operation_id: str, request: CommandRequest) -> str:
+    canonical = json.dumps(
+        {
+            "operation": operation_id,
+            "context": request.context.model_dump(mode="json"),
+            "arguments": request.arguments,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
 
 
 __all__ = ["Dispatcher", "invalid_request_result"]

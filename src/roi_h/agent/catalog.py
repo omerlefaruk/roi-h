@@ -39,6 +39,11 @@ from roi_h.agent.read_operations import (
     tool_list,
     tool_show,
 )
+from roi_h.agent.write_operations import (
+    project_create,
+    project_delete_apply,
+    project_delete_plan,
+)
 from roi_h.harness.workspace import Workspace, list_projects
 
 OperationHandler = Callable[[CommandRequest], dict[str, Any]]
@@ -181,6 +186,47 @@ def build_catalog() -> OperationCatalog:
                 properties=common_properties,
             )
         )
+    for operation_id, description, handler, effect, idempotency, plan_rule in (
+        (
+            "project.create",
+            "Create one project.",
+            project_create,
+            Effect.WRITE,
+            Idempotency.SUPPORTED,
+            "none",
+        ),
+        (
+            "project.delete.plan",
+            "Plan recoverable project deletion.",
+            project_delete_plan,
+            Effect.WRITE,
+            Idempotency.NOT_APPLICABLE,
+            "creates_plan",
+        ),
+        (
+            "project.delete.apply",
+            "Apply a reviewed project deletion plan.",
+            project_delete_apply,
+            Effect.DESTRUCTIVE,
+            Idempotency.REQUIRED,
+            "required",
+        ),
+    ):
+        catalog.register(
+            _operation(
+                operation_id,
+                description,
+                handler,
+                effect=effect,
+                idempotency=idempotency,
+                plan_rule=plan_rule,
+                properties=common_properties
+                | {
+                    "display_name": {"type": ["string", "null"]},
+                    "use": {"type": "boolean"},
+                },
+            )
+        )
     catalog.register(
         _read_operation(
             "system.context",
@@ -220,16 +266,38 @@ def _read_operation(
     pagination: bool = False,
     properties: dict[str, Any] | None = None,
 ) -> OperationDefinition:
+    return _operation(
+        operation_id,
+        description,
+        handler,
+        effect=Effect.READ,
+        idempotency=Idempotency.NOT_APPLICABLE,
+        pagination=pagination,
+        properties=properties,
+    )
+
+
+def _operation(  # noqa: PLR0913 - Descriptor fields stay explicit at registration.
+    operation_id: str,
+    description: str,
+    handler: OperationHandler,
+    *,
+    effect: Effect,
+    idempotency: Idempotency,
+    plan_rule: str = "none",
+    pagination: bool = False,
+    properties: dict[str, Any] | None = None,
+) -> OperationDefinition:
     return OperationDefinition(
         manifest=OperationManifest(
             operation_id=operation_id,
             description=description,
             input_schema=_object_schema(properties or {}),
             output_schema=_object_schema({}, allow_additional=True),
-            effect=Effect.READ,
-            idempotency=Idempotency.NOT_APPLICABLE,
+            effect=effect,
+            idempotency=idempotency,
             approval_rule="none",
-            plan_rule="none",
+            plan_rule=plan_rule,
             secret_input_paths=[],
             filesystem_requirements=[],
             network_requirements=[],

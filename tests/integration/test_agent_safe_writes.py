@@ -1,0 +1,94 @@
+"""Safe mutation contract for external AI callers."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+
+def _call(
+    operation: str,
+    request: dict[str, object],
+    *,
+    cwd: Path,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            "-m",
+            "roi_h",
+            "agent",
+            "call",
+            operation,
+            "--input",
+            "-",
+        ],
+        cwd=cwd,
+        input=json.dumps(request),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def test_project_write_replay_conflict_and_stale_plan(tmp_path: Path) -> None:
+    home = str(tmp_path / "home")
+    request: dict[str, object] = {
+        "schema_version": "1.0",
+        "request_id": "req_create_1",
+        "idempotency_key": "create-demo",
+        "arguments": {"home": home, "name": "demo", "use": True},
+    }
+    first = _call("project.create", request, cwd=tmp_path)
+    assert first.returncode == 0, first.stdout
+    first_payload = json.loads(first.stdout)
+    assert first_payload["changed"] is True
+
+    replay_request = {**request, "request_id": "req_create_2"}
+    replay = _call("project.create", replay_request, cwd=tmp_path)
+    assert replay.returncode == 0, replay.stdout
+    replay_payload = json.loads(replay.stdout)
+    assert replay_payload["result"] == first_payload["result"]
+    assert replay_payload["warnings"] == ["Returned the first result for this idempotency key."]
+
+    conflict_request = {
+        **request,
+        "request_id": "req_create_3",
+        "arguments": {"home": home, "name": "other", "use": True},
+    }
+    conflict = _call("project.create", conflict_request, cwd=tmp_path)
+    assert conflict.returncode == 1
+    conflict_payload = json.loads(conflict.stdout)
+    assert conflict_payload["error"]["code"] == "request.idempotency_conflict"
+    assert not (Path(home) / "projects" / "other").exists()
+
+    plan = _call(
+        "project.delete.plan",
+        {
+            "schema_version": "1.0",
+            "arguments": {"home": home, "name": "demo"},
+        },
+        cwd=tmp_path,
+    )
+    assert plan.returncode == 0, plan.stdout
+    plan_id = json.loads(plan.stdout)["result"]["plan_id"]
+    (Path(home) / "projects" / "demo" / "reference" / "changed.txt").write_text(
+        "changed",
+        encoding="utf-8",
+    )
+
+    apply = _call(
+        "project.delete.apply",
+        {
+            "schema_version": "1.0",
+            "idempotency_key": "delete-demo",
+            "arguments": {"home": home, "plan_id": plan_id},
+        },
+        cwd=tmp_path,
+    )
+    assert apply.returncode == 1
+    apply_payload = json.loads(apply.stdout)
+    assert apply_payload["error"]["code"] == "plan.state_changed"
+    assert (Path(home) / "projects" / "demo").is_dir()
