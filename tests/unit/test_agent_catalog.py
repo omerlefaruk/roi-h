@@ -66,3 +66,46 @@ def test_default_catalog_describes_and_executes_read_operation(tmp_path: Path) -
         ),
     )
     assert result == {"items": [], "count": 0}
+
+
+def test_default_catalog_contains_every_contract_1_0_operation() -> None:
+    required = {
+        item
+        for group in (
+            "system.version system.describe system.context system.doctor",
+            "task.list task.show task.events task.wait task.cancel",
+            (
+                "project.list project.show project.create project.use project.paths "
+                "project.doctor project.export project.import.verify project.import "
+                "project.rename project.delete.plan project.delete.apply"
+            ),
+            "environment.show environment.set environment.doctor",
+            (
+                "store.status store.check store.backup store.restore.plan "
+                "store.restore.apply store.migrate.plan store.migrate.apply "
+                "store.compact.plan store.compact.apply"
+            ),
+            "tool.list tool.show tool.invoke",
+            (
+                "run.start run.list run.show run.status run.events run.trace run.cancel "
+                "run.reconcile run.input.add run.files"
+            ),
+            "phase.list phase.begin phase.end phase.fail phase.skip phase.retry",
+            "approval.list approval.show approval.approve approval.reject",
+            "artifact.list artifact.show artifact.put artifact.export",
+            (
+                "skill.list skill.show skill.validate skill.define skill.promote "
+                "skill.delete.plan skill.delete.apply"
+            ),
+            (
+                "automation.list automation.show automation.verify automation.compare "
+                "automation.ship automation.run"
+            ),
+            "secret.list secret.status secret.set secret.delete",
+            "retention.plan retention.show retention.apply",
+            "diagnostic.list diagnostic.tail support_bundle.create",
+        )
+        for item in group.split()
+    }
+    actual = {item.operation_id for item in build_catalog().describe()}
+    assert actual == required
