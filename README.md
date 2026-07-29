@@ -1,5 +1,8 @@
 # ROI-H
 
+External AI agents use the installed CLI. See the
+[external AI CLI operator guide](docs/external-ai-cli-operator-guide.md).
+
 ROI-H is a durable RPA automation core on `activegraph==1.10.0`.
 ActiveGraph owns lifecycle, authority decisions, approvals, budgets, events, persistence,
 replay, and observability. ROI-H adds a skills catalog, isolated skill execution,
