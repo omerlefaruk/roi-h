@@ -206,6 +206,7 @@ ERROR_CODES = frozenset(
         "home.schema_unsupported",
         "operation.failed",
         "operation.not_found",
+        "operation.contract_violation",
         "package.digest_mismatch",
         "package.not_portable",
         "path.capability_denied",

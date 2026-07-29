@@ -6,6 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from jsonschema import Draft202012Validator
+
 from roi_h import __version__
 from roi_h.agent.contract import (
     JSON_SCHEMA_DIALECT,
@@ -122,6 +124,7 @@ class OperationCatalog:
             if schema.get("$schema") != JSON_SCHEMA_DIALECT:
                 msg = f"{operation_id} {schema_name} schema must use JSON Schema 2020-12"
                 raise ValueError(msg)
+            Draft202012Validator.check_schema(schema)
         self._operations[operation_id] = definition
 
     def describe(self, operation_id: str | None = None) -> list[OperationManifest]:

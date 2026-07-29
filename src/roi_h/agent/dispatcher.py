@@ -7,6 +7,8 @@ import json
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from jsonschema import Draft202012Validator
+
 from roi_h.agent.catalog import OperationCatalog, build_catalog
 from roi_h.agent.contract import (
     CommandContext,
@@ -53,7 +55,11 @@ class Dispatcher:
             },
         )
 
-    def execute(self, operation_id: str, request: CommandRequest) -> CommandResult:
+    def execute(  # noqa: PLR0911 - contract failures return at their detection point.
+        self,
+        operation_id: str,
+        request: CommandRequest,
+    ) -> CommandResult:
         """Validate, route, and wrap one operation."""
         request_id = _request_id(request.request_id)
         request = request.model_copy(update={"request_id": request_id})
@@ -67,6 +73,17 @@ class Dispatcher:
                     "invalid_request",
                     "idempotency_key is required for this operation",
                 )
+            invalid_input = _schema_failure(
+                operation_id,
+                request_id,
+                manifest.input_schema,
+                request.arguments,
+                code="request.invalid",
+                category="invalid_request",
+                root="arguments",
+            )
+            if invalid_input is not None:
+                return invalid_input
             replay = _idempotency_replay(operation_id, request)
             if replay is not None:
                 if replay.get("fingerprint") != _request_fingerprint(operation_id, request):
@@ -87,6 +104,17 @@ class Dispatcher:
                     warnings=["Returned the first result for this idempotency key."],
                 )
             result = self.catalog.execute(operation_id, request)
+            invalid_output = _schema_failure(
+                operation_id,
+                request_id,
+                manifest.output_schema,
+                result,
+                code="operation.contract_violation",
+                category="internal",
+                root="result",
+            )
+            if invalid_output is not None:
+                return invalid_output
         except KeyError as exc:
             return _failure(
                 operation_id,
@@ -146,12 +174,14 @@ def _mapped_failure(
     return _failure(operation_id, request_id, code, category, message)
 
 
-def _failure(
+def _failure(  # noqa: PLR0913 - error contract fields stay explicit.
     operation_id: str,
     request_id: str,
     code: str,
     category: str,
     message: str,
+    *,
+    details: dict[str, Any] | None = None,
 ) -> CommandResult:
     return CommandResult(
         operation=operation_id,
@@ -163,7 +193,40 @@ def _failure(
             category=category,
             message=message,
             retryable=False,
+            details=details or {},
         ),
+    )
+
+
+def _schema_failure(  # noqa: PLR0913 - schema context fields stay explicit.
+    operation_id: str,
+    request_id: str,
+    schema: dict[str, Any],
+    value: object,
+    *,
+    code: str,
+    category: str,
+    root: str,
+) -> CommandResult | None:
+    errors = sorted(
+        Draft202012Validator(schema).iter_errors(value),
+        key=lambda item: [str(part) for part in item.absolute_path],
+    )
+    if not errors:
+        return None
+    error = errors[0]
+    suffix = ".".join(str(part) for part in error.absolute_path)
+    path = f"{root}.{suffix}" if suffix else root
+    return _failure(
+        operation_id,
+        request_id,
+        code,
+        category,
+        error.message,
+        details={
+            "path": path,
+            "validator": str(error.validator),
+        },
     )
 
 
