@@ -131,9 +131,8 @@ class MacOSKeychainSecretStore:
         name: str,
         value: str,
     ) -> SecretMetadata:
-        # `security` has no secure stdin flag for add-generic-password. Use a short-lived
-        # process and never log/capture the argv. A native Security.framework adapter can
-        # replace this seam without changing callers.
+        # With ``-w`` as the last option, ``security`` reads the value from its prompt.
+        # Standard input supplies that prompt without exposing the value in process argv.
         completed = subprocess.run(  # noqa: S603
             [
                 "/usr/bin/security",
@@ -144,10 +143,10 @@ class MacOSKeychainSecretStore:
                 "-s",
                 self.service,
                 "-w",
-                value,
             ],
             check=False,
             capture_output=True,
+            input=value,
             text=True,
             timeout=15,
         )

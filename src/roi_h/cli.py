@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import re
 import shutil
@@ -579,8 +580,17 @@ def _build_parser() -> argparse.ArgumentParser:
     sec_set = secrets_sub.add_parser("set", help="Set a secret value")
     _add_workspace_options(sec_set)
     sec_set.add_argument("name")
-    sec_set.add_argument("value")
+    sec_set.add_argument("legacy_value", nargs="?", help=argparse.SUPPRESS)
+    sec_set.add_argument(
+        "--value-stdin",
+        action="store_true",
+        help="Read the secret value from standard input",
+    )
     sec_set.set_defaults(handler=_cmd_secret_set)
+    sec_status = secrets_sub.add_parser("status", help="Show names-only secret status")
+    _add_workspace_options(sec_status)
+    sec_status.add_argument("name")
+    sec_status.set_defaults(handler=_cmd_secret_status)
     sec_del = secrets_sub.add_parser("delete", help="Delete a secret")
     _add_workspace_options(sec_del)
     sec_del.add_argument("name")
@@ -1533,7 +1543,23 @@ def _cmd_secret_list(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _cmd_secret_set(args: argparse.Namespace) -> dict[str, Any]:
-    return set_secret(_workspace(args), args.name, args.value)
+    if args.legacy_value is not None:
+        msg = "positional secret values are not supported"
+        raise ValueError(msg)
+    value = sys.stdin.read() if args.value_stdin else getpass.getpass("Secret value: ")
+    return set_secret(_workspace(args), args.name, value)
+
+
+def _cmd_secret_status(args: argparse.Namespace) -> dict[str, Any]:
+    data = list_secrets(_workspace(args))
+    return {
+        "ok": True,
+        "name": args.name,
+        "configured": args.name in data["names"],
+        "project": data["project"],
+        "environment": data["environment"],
+        "provider": data["provider"],
+    }
 
 
 def _cmd_secret_delete(args: argparse.Namespace) -> dict[str, Any]:

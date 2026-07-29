@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 from roi_h.harness.loader import default_skills_root
 
@@ -170,3 +171,48 @@ def test_required_human_read_command_groups(tmp_path: Path) -> None:
         result = _roi_h("rpa", *command, cwd=tmp_path)
         assert result.returncode == 0, (command, result.stdout, result.stderr)
         assert json.loads(result.stdout)
+
+
+def test_secret_set_accepts_stdin_and_rejects_positional_values(tmp_path: Path) -> None:
+    home = str(tmp_path / ".roi-h")
+    init = _roi_h("rpa", "project", "create", "demo", "--home", home, cwd=tmp_path)
+    assert init.returncode == 0, init.stderr
+    secret = f"value-{uuid4().hex}"
+
+    rejected = _roi_h(
+        "rpa",
+        "secret",
+        "set",
+        "TOKEN",
+        secret,
+        "--home",
+        home,
+        cwd=tmp_path,
+    )
+    assert rejected.returncode != 0
+    assert secret not in rejected.stdout
+    assert secret not in rejected.stderr
+
+    accepted = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            "-m",
+            "roi_h",
+            "rpa",
+            "secret",
+            "set",
+            "TOKEN",
+            "--value-stdin",
+            "--home",
+            home,
+        ],
+        cwd=tmp_path,
+        input=secret,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert accepted.returncode == 0, accepted.stderr
+    assert secret not in accepted.stdout
+    assert secret not in accepted.stderr
+    assert json.loads(accepted.stdout)["name"] == "TOKEN"
