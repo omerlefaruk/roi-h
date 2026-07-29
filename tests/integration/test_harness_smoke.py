@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from roi_h import RunSession
 from roi_h.harness.custom import define_project_tool
+from roi_h.harness.diagnostics import DiagnosticSink
 from roi_h.harness.loader import default_skills_root
 from roi_h.harness.secrets import set_secret
 from roi_h.harness.workspace import Workspace, create_project
@@ -135,6 +136,9 @@ def test_project_secrets_are_resolved_for_tools_but_redacted_from_records(
     assert completed.output == {"token": "{{secret.TOKEN}}"}
     assert secret not in str(completed.model_dump(mode="json"))
     assert secret not in str([obj.data for obj in harness.runtime.graph.objects(type="rpa.step")])
+    stored_step = harness.runtime.graph.get_object(completed.step_id)
+    assert stored_step is not None
+    assert stored_step.data["approval_id"] == completed.approval_id
 
 
 def test_isolated_worker_receives_only_declared_secrets(
@@ -187,3 +191,42 @@ def test_isolated_worker_receives_only_declared_secrets(
         "hidden": None,
         "host_only": None,
     }
+
+
+def test_isolated_runtime_failure_creates_actionable_diagnostic(tmp_path: Path) -> None:
+    ws = _open_ws(tmp_path)
+    define_project_tool(
+        skill="runtime_probe",
+        tool="fail",
+        description="Raise one isolated runtime fault",
+        project_root=ws.project_skills,
+        source=(
+            "from pydantic import BaseModel\n"
+            "TOOL_ID = 'fail'\n"
+            "DESCRIPTION = 'raise a runtime fault'\n"
+            "REQUIRES_APPROVAL = False\n"
+            "class Input(BaseModel):\n"
+            "    pass\n"
+            "class Output(BaseModel):\n"
+            "    ok: bool\n"
+            "def run(args: Input) -> Output:\n"
+            "    raise OSError('socket bootstrap failed')\n"
+        ),
+    )
+    harness = RunSession.create(
+        ws,
+        run_id="runtime-diagnostic",
+        skills_root=default_skills_root(),
+        auto_approve=True,
+    )
+    harness.start_run("record runtime failure")
+
+    result = harness.invoke("runtime_probe", "fail", {})
+
+    assert result.status == "error"
+    assert result.failure is not None
+    diagnostic_id = result.failure.details["diagnostic_id"]
+    diagnostics = DiagnosticSink(ws.root).read()
+    assert diagnostics[-1]["diagnostic_id"] == diagnostic_id
+    assert diagnostics[-1]["code"] == "tool.runtime_failure"
+    assert diagnostics[-1]["details"]["tool"] == "runtime_probe.fail"

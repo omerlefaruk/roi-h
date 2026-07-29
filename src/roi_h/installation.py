@@ -10,6 +10,8 @@ from importlib import metadata, resources
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
+from roi_h.harness.runtime_environment import inspect_isolated_runtime_bootstrap
+
 if TYPE_CHECKING:
     from importlib.resources.abc import Traversable
 
@@ -124,6 +126,15 @@ def inspect_installation_health(
         managed_state,
         managed_details,
     )
+    runtime_checks = tuple(
+        HealthCheck(
+            code=check.code,
+            status="pass" if check.ok else "fail",
+            message=check.message,
+            details=cast("dict[str, JsonValue]", check.details),
+        )
+        for check in inspect_isolated_runtime_bootstrap().checks
+    )
     version_text = ".".join(str(part) for part in resolved_python_version)
 
     checks = (
@@ -172,6 +183,7 @@ def inspect_installation_health(
             details=managed_details,
         ),
         browser_check,
+        *runtime_checks,
     )
 
     return InstallationHealthReport(

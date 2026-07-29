@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import io
 import json
 import subprocess
 import sys
 from pathlib import Path
 from uuid import uuid4
+
+from roi_h.agent.cli import _emit
+from roi_h.agent.contract import CommandResult
 
 
 def _agent(
@@ -77,6 +81,94 @@ def test_agent_invalid_input_is_structured_and_exits_two(tmp_path: Path) -> None
     assert payload["changed"] is False
     assert payload["error"]["code"] == "request.invalid"
     assert payload["error"]["retryable"] is False
+
+
+def test_agent_machine_output_is_utf8(monkeypatch) -> None:
+    class Console:
+        def __init__(self) -> None:
+            self.buffer = io.BytesIO()
+
+        def write(self, _value: str) -> None:
+            message = "the text fallback must not be used"
+            raise AssertionError(message)
+
+    console = Console()
+    monkeypatch.setattr(sys, "stdout", console)
+    result = CommandResult(
+        operation="test.utf8",
+        request_id="req_utf8",
+        ok=True,
+        changed=False,
+        result={"text": "\ufffd"},
+    )
+
+    _emit(result)
+
+    payload = json.loads(console.buffer.getvalue().decode("utf-8"))
+    assert payload["result"]["text"] == "\ufffd"
+
+
+def test_agent_doctors_report_isolated_socket_and_tls_health(tmp_path: Path) -> None:
+    home = str(tmp_path / "home")
+    uninitialized_request = json.dumps(
+        {
+            "schema_version": "1.0",
+            "arguments": {"home": home},
+        }
+    )
+    uninitialized = _agent(
+        "call",
+        "system.doctor",
+        "--input",
+        "-",
+        cwd=tmp_path,
+        stdin=uninitialized_request,
+    )
+    assert uninitialized.returncode == 0, uninitialized.stdout
+    uninitialized_result = json.loads(uninitialized.stdout)["result"]
+    assert uninitialized_result["runtime"]["healthy"] is True
+    assert uninitialized_result["checks"]["runtime_socket_bootstrap"] is True
+    assert uninitialized_result["checks"]["runtime_tls_bootstrap"] is True
+
+    create_request = json.dumps(
+        {
+            "schema_version": "1.0",
+            "request_id": "req_doctor_project",
+            "idempotency_key": "doctor-project-create",
+            "arguments": {"home": home, "name": "demo"},
+        }
+    )
+    created = _agent(
+        "call",
+        "project.create",
+        "--input",
+        "-",
+        cwd=tmp_path,
+        stdin=create_request,
+    )
+    assert created.returncode == 0, created.stdout
+
+    request = json.dumps(
+        {
+            "schema_version": "1.0",
+            "context": {"project": "demo", "environment": "dev"},
+            "arguments": {"home": home},
+        }
+    )
+    for operation in ("system.doctor", "environment.doctor", "project.doctor"):
+        called = _agent(
+            "call",
+            operation,
+            "--input",
+            "-",
+            cwd=tmp_path,
+            stdin=request,
+        )
+        assert called.returncode == 0, called.stdout
+        result = json.loads(called.stdout)["result"]
+        assert result["runtime"]["healthy"] is True
+        assert result["checks"]["runtime_socket_bootstrap"] is True
+        assert result["checks"]["runtime_tls_bootstrap"] is True
 
 
 def test_agent_can_find_and_explain_a_run_without_sql(tmp_path: Path) -> None:

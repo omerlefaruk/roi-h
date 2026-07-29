@@ -67,8 +67,12 @@ def test_inspect_reports_a_healthy_managed_install(tmp_path: Path) -> None:
         "data_home.access",
         "install.managed_state",
         "browser.launch",
+        "runtime.socket_bootstrap",
+        "runtime.tls_bootstrap",
     ]
     assert _checks_by_code(report)["browser.launch"].status == "pass"
+    assert _checks_by_code(report)["runtime.socket_bootstrap"].status == "pass"
+    assert _checks_by_code(report)["runtime.tls_bootstrap"].status == "pass"
 
 
 def test_inspect_does_not_create_a_missing_data_home(tmp_path: Path) -> None:

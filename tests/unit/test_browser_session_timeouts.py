@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 from types import SimpleNamespace
+
+from roi_h.harness.logical_paths import PathScope, normalize_tool_output
+from roi_h.harness.workspace import Workspace, create_project
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -77,3 +81,46 @@ def test_restored_page_selection_is_generic_and_prefers_newest_usable() -> None:
     ]
 
     assert session._select_page(pages) is pages[-1]
+
+
+def test_session_status_omits_private_state_path(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    session = _load_module(
+        "browser_session_status_path_test",
+        REPO_ROOT / "skills/browser/scripts/_session.py",
+    )
+    monkeypatch.setattr(
+        session,
+        "_read_state",
+        lambda: {
+            "endpoint": "http://127.0.0.1:9222",
+            "pid": 42,
+            "headed": False,
+            "ref_map": {},
+        },
+    )
+    monkeypatch.setattr(session, "_pid_alive", lambda _pid: True)
+    status = session.session_status()
+
+    assert "state_path" not in status
+
+    home = tmp_path / ".roi-h"
+    create_project(home, "demo", set_active=True)
+    workspace = Workspace.open(home, project="demo", env="dev")
+    normalized = normalize_tool_output(
+        status,
+        scope=PathScope(workspace, run_id="status-run"),
+    )
+
+    assert normalized == status
+
+
+def test_windows_pid_probe_detects_current_process() -> None:
+    session = _load_module(
+        "browser_session_windows_pid_test",
+        REPO_ROOT / "skills/browser/scripts/_session.py",
+    )
+
+    assert session._pid_alive(os.getpid()) is True

@@ -123,7 +123,12 @@ def _context_arguments(args: argparse.Namespace) -> dict[str, str]:
 
 
 def _emit(result: CommandResult) -> None:
-    sys.stdout.write(result.model_dump_json() + "\n")
+    payload = (result.model_dump_json() + "\n").encode("utf-8")
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is not None:
+        buffer.write(payload)
+        return
+    sys.stdout.write(payload.decode("utf-8"))
 
 
 __all__ = ["main"]

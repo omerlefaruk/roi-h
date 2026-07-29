@@ -107,6 +107,7 @@ def approve(
         attempt=int(pending.data.get("attempt") or 1),
     )
     skill_tool = catalog.resolve(str(pending.data["skill"]), str(pending.data["tool"]))
+    pending.data["approval_id"] = approval_id
     object_id = runtime.approve(approval_id, approved_by=approved_by)
     runtime.run_until_idle()
     invocation = runtime.graph.get_object(object_id)

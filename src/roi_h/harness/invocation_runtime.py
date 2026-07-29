@@ -22,6 +22,7 @@ from activegraph.tools import Tool, ToolContext, ToolError
 from activegraph.tools.cache import CachedToolResponse, canonicalize_args, hash_tool_call
 from pydantic import BaseModel
 
+from roi_h.harness.diagnostics import DiagnosticRecord, DiagnosticSink
 from roi_h.harness.domain import (
     ExecutionFailure,
     FailureKind,
@@ -39,6 +40,7 @@ from roi_h.harness.logical_paths import (
 )
 from roi_h.harness.records import InvocationRecord, StepRecord
 from roi_h.harness.run_storage import RunStorage
+from roi_h.harness.runtime_environment import isolated_process_environment
 from roi_h.harness.secrets import (
     get_secret,
     redact_secret_values,
@@ -155,6 +157,7 @@ def build_invocation_behaviors(
         invocation_object_id = str(raw["id"])
         runtime: Runtime = ctx._runtime  # noqa: SLF001
         tool = runtime.get_tool(str(data["name"]))
+        skill_tool = catalog.resolve(str(data["skill"]), str(data["tool"]))
         runtime.budget.consume("max_tool_calls")
         started_at = _now()
         started = time.monotonic()
@@ -207,6 +210,22 @@ def build_invocation_behaviors(
             failure = failure.model_copy(
                 update={"message": str(redact_secret_values(failure.message, workspace))}
             )
+            if failure.kind != "validation" or failure.exception_type == "LogicalPathError":
+                diagnostic_id = _emit_invocation_failure_diagnostic(
+                    workspace,
+                    skill_tool=skill_tool,
+                    run_id=str(data["run_id"]),
+                    invocation_id=str(data["invocation_id"]),
+                    failure=failure,
+                )
+                failure = failure.model_copy(
+                    update={
+                        "details": {
+                            **failure.details,
+                            "diagnostic_id": diagnostic_id,
+                        }
+                    }
+                )
             latency = max(0.0, time.monotonic() - started)
 
         graph.emit(
@@ -234,7 +253,7 @@ def build_invocation_behaviors(
         )
         step = _record_step(
             graph,
-            skill_tool=catalog.resolve(str(data["skill"]), str(data["tool"])),
+            skill_tool=skill_tool,
             run_id=str(data["run_id"]),
             args=args,
             output=output,
@@ -538,25 +557,20 @@ def _worker_environment(
     idempotency_key: str,
 ) -> dict[str, str]:
     paths = RunStorage(workspace).prepare(run_id)
-    allowed_base = {
-        "PATH",
-        "PYTHONPATH",
-        "VIRTUAL_ENV",
-        "SSL_CERT_FILE",
-        "SSL_CERT_DIR",
-        "REQUESTS_CA_BUNDLE",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "NO_PROXY",
-        "LANG",
-        "LC_ALL",
-        "TMPDIR",
+    env = isolated_process_environment()
+    browser_environment = {
         "ROI_H_BROWSER",
         "ROI_H_BROWSER_HEADED",
         "ROI_H_BROWSER_SLOW_MO",
         "ROI_H_BROWSER_CONNECT_TIMEOUT_MS",
     }
-    env = {key: value for key, value in os.environ.items() if key in allowed_base}
+    env.update(
+        {
+            key: value
+            for key, value in os.environ.items()
+            if key.upper() in browser_environment
+        }
+    )
     env.update(
         {
             "ROI_H_HOME": str(workspace.root),
@@ -703,6 +717,42 @@ def _failure_from_exception(exc: Exception) -> ExecutionFailure:
         exception_type=type(exc).__name__,
         retryable=isinstance(exc, TimeoutError),
     )
+
+
+def _emit_invocation_failure_diagnostic(
+    workspace: Workspace,
+    *,
+    skill_tool: SkillTool,
+    run_id: str,
+    invocation_id: str,
+    failure: ExecutionFailure,
+) -> str:
+    code = {
+        "internal": "tool.runtime_failure",
+        "timeout": "tool.timeout",
+        "validation": "tool.output_contract_failure",
+        "unknown": "tool.unknown_failure",
+    }.get(failure.kind, "tool.execution_failure")
+    record = DiagnosticRecord(
+        code=code,
+        message=f"{skill_tool.name} failed during isolated tool execution.",
+        component="harness.invocation_runtime",
+        project_id=workspace.project_id,
+        project=workspace.project,
+        environment=workspace.env,
+        run_id=run_id,
+        invocation_id=invocation_id,
+        exception_type=failure.exception_type,
+        details={
+            "tool": skill_tool.name,
+            "failure_kind": failure.kind,
+            "retryable": failure.retryable,
+            "error": failure.message,
+            **failure.details,
+        },
+    )
+    DiagnosticSink(workspace.root).emit(record)
+    return record.diagnostic_id
 
 
 def _now() -> str:

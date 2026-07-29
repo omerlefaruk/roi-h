@@ -24,6 +24,10 @@ from roi_h.harness.logical_paths import LogicalPath, PathResolver, PathScope
 from roi_h.harness.project_archive import ProjectArchive
 from roi_h.harness.retention import RetentionPlanner
 from roi_h.harness.run_storage import RunStorage
+from roi_h.harness.runtime_environment import (
+    RuntimeBootstrapReport,
+    inspect_isolated_runtime_bootstrap,
+)
 from roi_h.harness.secrets import delete_secret, set_secret
 from roi_h.harness.store_lifecycle import StoreLifecycle
 from roi_h.harness.workspace import (
@@ -42,25 +46,33 @@ if TYPE_CHECKING:
 def system_doctor(request: CommandRequest) -> dict[str, Any]:
     """Check the selected home and project without changing state."""
     home = resolve_home(request.arguments.get("home"))
+    runtime = inspect_isolated_runtime_bootstrap()
+    runtime_results = {check.code: check.ok for check in runtime.checks}
+    runtime_checks = {
+        "runtime_socket_bootstrap": runtime_results.get("runtime.socket_bootstrap", False),
+        "runtime_tls_bootstrap": runtime_results.get("runtime.tls_bootstrap", False),
+    }
     result: dict[str, Any] = {
         "version": __version__,
         "python": f"{sys.version_info.major}.{sys.version_info.minor}",
         "home_initialized": (home / "home.json").is_file(),
         "project": None,
-        "checks": {},
-        "errors": [],
+        "checks": runtime_checks,
+        "runtime": runtime.to_dict(),
+        "errors": [name for name, passed in runtime_checks.items() if passed is False],
     }
     try:
         workspace = _workspace(request)
     except (FileNotFoundError, ValueError):
-        result["errors"] = ["No selected project is available."]
+        result["errors"] = [*result["errors"], "No selected project is available."]
         return result
-    checks = _project_checks(workspace)
+    checks = _project_checks(workspace, runtime)
     result.update(
         {
             "project": workspace.project,
             "environment": workspace.env,
             "checks": checks,
+            "runtime": runtime.to_dict(),
             "errors": [name for name, passed in checks.items() if passed is False],
         }
     )
@@ -73,7 +85,8 @@ def project_use(request: CommandRequest) -> dict[str, Any]:
 
 def project_doctor(request: CommandRequest) -> dict[str, Any]:
     workspace = _workspace(request)
-    checks = _project_checks(workspace)
+    runtime = inspect_isolated_runtime_bootstrap()
+    checks = _project_checks(workspace, runtime)
     store = None
     if workspace.db.is_file():
         store = (
@@ -91,8 +104,23 @@ def project_doctor(request: CommandRequest) -> dict[str, Any]:
         "project": workspace.project,
         "environment": workspace.env,
         "checks": checks,
+        "runtime": runtime.to_dict(),
         "store": _safe(store),
         "errors": errors,
+    }
+
+
+def environment_doctor(request: CommandRequest) -> dict[str, Any]:
+    """Inspect the selected environment and its isolated runtime."""
+    workspace = _workspace(request)
+    runtime = inspect_isolated_runtime_bootstrap()
+    checks = _project_checks(workspace, runtime)
+    return {
+        "project": workspace.project,
+        "environment": workspace.env,
+        "checks": checks,
+        "runtime": runtime.to_dict(),
+        "errors": [name for name, passed in checks.items() if passed is False],
     }
 
 
@@ -743,7 +771,12 @@ def _string_list(value: object) -> list[str] | None:
     return cast("list[str]", value)
 
 
-def _project_checks(workspace: Workspace) -> dict[str, bool]:
+def _project_checks(
+    workspace: Workspace,
+    runtime: RuntimeBootstrapReport | None = None,
+) -> dict[str, bool]:
+    runtime_report = runtime or inspect_isolated_runtime_bootstrap()
+    runtime_results = {check.code: check.ok for check in runtime_report.checks}
     return {
         "project_manifest": workspace.config_path.is_file(),
         "environment_manifest": workspace.environment_config_path.is_file(),
@@ -758,6 +791,8 @@ def _project_checks(workspace: Workspace) -> dict[str, bool]:
                 workspace.environment_root,
             )
         ),
+        "runtime_socket_bootstrap": runtime_results.get("runtime.socket_bootstrap", False),
+        "runtime_tls_bootstrap": runtime_results.get("runtime.tls_bootstrap", False),
     }
 
 

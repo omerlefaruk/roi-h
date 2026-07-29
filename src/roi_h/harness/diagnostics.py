@@ -1,4 +1,4 @@
-"""Bounded failure diagnostics used only when ActiveGraph cannot record state."""
+"""Bounded, redacted operational failure diagnostics."""
 
 from __future__ import annotations
 

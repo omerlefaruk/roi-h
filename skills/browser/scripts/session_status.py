@@ -15,7 +15,6 @@ class Output(BaseModel):
     headed: bool | None = None
     last_url: str | None = None
     last_title: str | None = None
-    state_path: str = ""
     ref_count: int = 0
 def run(args: Input) -> Output:
     del args
@@ -26,6 +25,6 @@ def run(args: Input) -> Output:
         sys.path.insert(0, str(_s))
     from _session import session_status, use_stub
     if use_stub():
-        return Output(ok=True, alive=False, state_path="stub")
+        return Output(ok=True, alive=False)
     data = session_status()
     return Output(**data)

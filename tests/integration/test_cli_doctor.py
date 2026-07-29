@@ -47,6 +47,8 @@ def test_doctor_reports_json_without_creating_user_paths(tmp_path: Path) -> None
         "data_home.access",
         "install.managed_state",
         "python.version",
+        "runtime.socket_bootstrap",
+        "runtime.tls_bootstrap",
         "skills.built_in",
     }
     assert completed.stderr == ""
