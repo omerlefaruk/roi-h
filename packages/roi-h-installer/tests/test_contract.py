@@ -45,7 +45,9 @@ def _build_test_roi_h_wheel(
     wheel = wheelhouse / f"roi_h-{version}-py3-none-any.whl"
     active_check = (
         "        current = Path(os.environ['ROI_H_INSTALL_ROOT']) / 'current'\n"
-        "        ok = not current.exists() or current.resolve() != Path(sys.prefix).resolve()\n"
+        f"        active = (current.read_text().strip() == {version!r} if current.is_file() "
+        "else current.exists() and current.resolve() == Path(sys.prefix).resolve())\n"
+        "        ok = not active\n"
         if fail_when_active
         else f"        ok = {doctor_ok!r}\n"
     )
@@ -356,7 +358,11 @@ def test_apply_initial_install_activates_only_after_offline_doctor(
     assert state.active_version == _TEST_VERSION
     assert state.installed_versions == (_TEST_VERSION,)
     assert state.staging_state is StagingState.NONE
-    active_cli = install_root / "current" / "bin" / "roi-h"
+    active_cli = (
+        install_root / "versions" / _TEST_VERSION / "Scripts" / "roi-h.exe"
+        if sys.platform == "win32"
+        else install_root / "current" / "bin" / "roi-h"
+    )
     doctor = subprocess.run(  # noqa: S603
         [active_cli, "doctor", "--output", "json"],
         check=True,
@@ -727,8 +733,13 @@ def test_post_activation_doctor_failure_restores_previous_pointer_and_state(
     assert state.staging_state is StagingState.NONE
     assert (install_root / "install-state.json").read_bytes() == previous_state
     assert marker.read_text(encoding="utf-8") == "keep"
+    active_cli = (
+        install_root / "versions" / "0.1.0" / "Scripts" / "roi-h.exe"
+        if sys.platform == "win32"
+        else install_root / "current" / "bin" / "roi-h"
+    )
     active_doctor = subprocess.run(  # noqa: S603
-        [install_root / "current" / "bin" / "roi-h", "doctor", "--output", "json"],
+        [active_cli, "doctor", "--output", "json"],
         check=True,
         capture_output=True,
         text=True,

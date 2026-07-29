@@ -775,7 +775,13 @@ def _install_browser(
 
 def _run_staged_doctor(staged_environment: Path, install_plan: InstallPlan) -> None:
     environment = os.environ.copy()
-    environment["ROI_H_INSTALL_ROOT"] = str(install_plan.install_root)
+    state_file = install_plan.install_root / "install-state.json"
+    doctor_install_root = (
+        install_plan.install_root
+        if state_file.is_file()
+        else staged_environment / ".pre-activation-install-root"
+    )
+    environment["ROI_H_INSTALL_ROOT"] = str(doctor_install_root)
     environment["ROI_H_HOME"] = str(install_plan.data_home)
     completed = _run_process(
         [str(_environment_cli(staged_environment)), "doctor", "--output", "json"],

@@ -181,7 +181,10 @@ try {
     $uvInstallerScript = [ScriptBlock]::Create(
         [IO.File]::ReadAllText($uvInstallerPath)
     )
-    & $uvInstallerScript
+    & {
+        Set-StrictMode -Off
+        & $uvInstallerScript
+    }
     $uvBinary = Join-Path $uvRoot "uv.exe"
     if (-not (Test-Path -LiteralPath $uvBinary -PathType Leaf)) {
         Stop-Install "The pinned uv installer did not create uv."
