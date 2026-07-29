@@ -183,7 +183,7 @@ def promote_advice(
                 "verdict": verdict,
                 "reason": reason,
                 "promote_command": (
-                    f"roi-h rpa promote --skill {item['skill']} --tool {item['tool']}"
+                    f"roi-h rpa skill promote {item['skill']} --tool {item['tool']}"
                 ),
             }
         )

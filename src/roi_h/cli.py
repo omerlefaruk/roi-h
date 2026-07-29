@@ -12,6 +12,7 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
+from uuid import uuid4
 
 from activegraph.store.sqlite import SQLiteEventStore
 
@@ -659,6 +660,27 @@ def _build_parser() -> argparse.ArgumentParser:
         _add_skills_option(skill_show)
         skill_show.add_argument("name")
         skill_show.set_defaults(handler=_cmd_skill_show)
+    skill_promote = skill_sub.add_parser("promote")
+    _add_workspace_options(skill_promote)
+    skill_promote.add_argument("name")
+    skill_promote.add_argument("--tool", default=None)
+    skill_promote.add_argument("--overwrite", action="store_true")
+    skill_promote.add_argument("--idempotency-key", default=None)
+    skill_promote.set_defaults(handler=_cmd_skill_promote)
+    skill_delete = skill_sub.add_parser("delete")
+    skill_delete_sub = skill_delete.add_subparsers(
+        dest="skill_delete_command",
+        required=True,
+    )
+    skill_delete_plan = skill_delete_sub.add_parser("plan")
+    _add_workspace_options(skill_delete_plan)
+    skill_delete_plan.add_argument("name")
+    skill_delete_plan.set_defaults(handler=_cmd_skill_delete_plan)
+    skill_delete_apply = skill_delete_sub.add_parser("apply")
+    _add_workspace_options(skill_delete_apply)
+    skill_delete_apply.add_argument("plan_id")
+    skill_delete_apply.add_argument("--idempotency-key", default=None)
+    skill_delete_apply.set_defaults(handler=_cmd_skill_delete_apply)
 
     automation = rpa_sub.add_parser(
         "automation",
@@ -1095,6 +1117,7 @@ def _call_operation(
     **values: object,
 ) -> dict[str, Any]:
     request = CommandRequest(
+        idempotency_key=getattr(args, "idempotency_key", None) or f"human:{uuid4().hex}",
         context=CommandContext(
             project=getattr(args, "project", None),
             environment=getattr(args, "env", None),
@@ -1165,6 +1188,24 @@ def _cmd_skill_list(args: argparse.Namespace) -> dict[str, Any]:
 
 def _cmd_skill_show(args: argparse.Namespace) -> dict[str, Any]:
     return _call_operation(args, f"skill.{args.skill_command}", name=args.name)
+
+
+def _cmd_skill_promote(args: argparse.Namespace) -> dict[str, Any]:
+    return _call_operation(
+        args,
+        "skill.promote",
+        name=args.name,
+        tool=args.tool,
+        overwrite=args.overwrite,
+    )
+
+
+def _cmd_skill_delete_plan(args: argparse.Namespace) -> dict[str, Any]:
+    return _call_operation(args, "skill.delete.plan", name=args.name)
+
+
+def _cmd_skill_delete_apply(args: argparse.Namespace) -> dict[str, Any]:
+    return _call_operation(args, "skill.delete.apply", plan_id=args.plan_id)
 
 
 def _cmd_automation_list(args: argparse.Namespace) -> dict[str, Any]:

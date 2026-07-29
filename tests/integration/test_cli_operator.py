@@ -216,3 +216,50 @@ def test_secret_set_accepts_stdin_and_rejects_positional_values(tmp_path: Path) 
     assert secret not in accepted.stdout
     assert secret not in accepted.stderr
     assert json.loads(accepted.stdout)["name"] == "TOKEN"
+
+
+def test_human_skill_promote_and_delete_plan_apply(tmp_path: Path) -> None:
+    home = str(tmp_path / ".roi-h")
+    init = _roi_h("rpa", "project", "create", "demo", "--home", home, cwd=tmp_path)
+    assert init.returncode == 0, init.stderr
+    define = _roi_h(
+        "rpa",
+        "custom",
+        "--skill",
+        "sample",
+        "--tool",
+        "work",
+        "--home",
+        home,
+        cwd=tmp_path,
+    )
+    assert define.returncode == 0, define.stderr
+
+    promote = _roi_h("rpa", "skill", "promote", "sample", "--home", home, cwd=tmp_path)
+    assert promote.returncode == 0, promote.stderr
+    assert json.loads(promote.stdout)["name"] == "sample"
+
+    planned = _roi_h(
+        "rpa",
+        "skill",
+        "delete",
+        "plan",
+        "sample",
+        "--home",
+        home,
+        cwd=tmp_path,
+    )
+    assert planned.returncode == 0, planned.stderr
+    plan_id = json.loads(planned.stdout)["plan_id"]
+    applied = _roi_h(
+        "rpa",
+        "skill",
+        "delete",
+        "apply",
+        plan_id,
+        "--home",
+        home,
+        cwd=tmp_path,
+    )
+    assert applied.returncode == 0, applied.stderr
+    assert json.loads(applied.stdout)["recoverable"] is True
