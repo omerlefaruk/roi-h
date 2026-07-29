@@ -178,7 +178,10 @@ try {
     $null = New-Item -ItemType Directory -Path $uvRoot -Force
     $env:UV_UNMANAGED_INSTALL = $uvRoot
     $env:UV_NO_MODIFY_PATH = "1"
-    & $uvInstallerPath
+    $uvInstallerScript = [ScriptBlock]::Create(
+        [IO.File]::ReadAllText($uvInstallerPath)
+    )
+    & $uvInstallerScript
     $uvBinary = Join-Path $uvRoot "uv.exe"
     if (-not (Test-Path -LiteralPath $uvBinary -PathType Leaf)) {
         Stop-Install "The pinned uv installer did not create uv."

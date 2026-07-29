@@ -22,6 +22,8 @@ def test_powershell_bootstrap_matches_the_pinned_install_contract() -> None:
     assert '"This release supports Windows x86-64 only."' in script
     assert "https://astral.sh/uv/$uvVersion/install.ps1" in script
     assert "Get-FileHash -Algorithm SHA256" in script
+    assert "[ScriptBlock]::Create(" in script
+    assert "& $uvInstallerPath" not in script
     assert "System.IO.Compression.ZipFile" not in script
     assert "release.json" in script
     assert "*.whl" in script
