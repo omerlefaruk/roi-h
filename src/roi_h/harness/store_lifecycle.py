@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
@@ -13,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from roi_h.harness.atomicfs import atomic_write_json
+from roi_h.harness.atomicfs import atomic_write_json, hash_file
 from roi_h.harness.lease import RunLease
 from roi_h.harness.workspace import HOME_LAYOUT_VERSION, Workspace
 
@@ -253,7 +252,7 @@ class StoreLifecycle:
                 if integrity != "ok":
                     msg = f"store.integrity_failed: backup: {integrity}"
                     raise RuntimeError(msg)  # noqa: TRY301
-            digest, size = _hash_file(staging)
+            digest, size = hash_file(staging)
             created_at = datetime.now(UTC).isoformat()
             manifest = {
                 "schema_version": 1,
@@ -312,7 +311,7 @@ class StoreLifecycle:
                     sqlite3.connect(previous_path) as previous_store,
                 ):
                     current.backup(previous_store)
-                previous_digest, previous_size = _hash_file(previous_path)
+                previous_digest, previous_size = hash_file(previous_path)
                 atomic_write_json(
                     previous_path.with_name(previous_path.name + ".manifest.json"),
                     {
@@ -439,7 +438,7 @@ def _validate_backup(source: Path, workspace: Workspace) -> None:
     if not isinstance(raw, dict) or raw.get("kind") != "roi-h-activegraph-backup":
         msg = "store.restore_failed: invalid backup manifest"
         raise ValueError(msg)
-    digest, size = _hash_file(source)
+    digest, size = hash_file(source)
     if digest != raw.get("sha256") or size != raw.get("bytes"):
         msg = "store.restore_failed: backup digest mismatch"
         raise ValueError(msg)
@@ -450,16 +449,6 @@ def _validate_backup(source: Path, workspace: Workspace) -> None:
         if str(connection.execute("PRAGMA integrity_check").fetchone()[0]) != "ok":
             msg = "store.restore_failed: backup integrity check failed"
             raise ValueError(msg)
-
-
-def _hash_file(path: Path) -> tuple[str, int]:
-    digest = hashlib.sha256()
-    size = 0
-    with path.open("rb") as stream:
-        while chunk := stream.read(1024 * 1024):
-            digest.update(chunk)
-            size += len(chunk)
-    return f"sha256:{digest.hexdigest()}", size
 
 
 __all__ = [

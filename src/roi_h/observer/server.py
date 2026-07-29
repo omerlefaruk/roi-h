@@ -139,7 +139,7 @@ class ObserverHandler(BaseHTTPRequestHandler):
     def _send_static(self, request_path: str) -> None:
         relative = "index.html" if request_path in {"", "/"} else request_path.lstrip("/")
         path = (_STATIC_ROOT / relative).resolve()
-        if not _is_relative_to(path, _STATIC_ROOT.resolve()) or not path.is_file():
+        if not path.is_relative_to(_STATIC_ROOT.resolve()) or not path.is_file():
             self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
             return
         content_type = {
@@ -235,14 +235,6 @@ def _quote_filename(value: str) -> str:
 
 def _content_type(path: Path) -> str:
     return mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-
-
-def _is_relative_to(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-    except ValueError:
-        return False
-    return True
 
 
 __all__ = ["ObserverHandler", "ObserverServer", "serve_observer"]
