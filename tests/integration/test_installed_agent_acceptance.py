@@ -527,7 +527,22 @@ def test_installed_cli_agent_acceptance_from_empty_home(  # noqa: PLR0915
         },
     )
     task_id = backup["result"]["task"]["task_id"]
+    assert backup["result"]["task"]["state"] in {"queued", "working"}
     assert str(tmp_path) not in json.dumps(backup)
+    waited = _call(
+        executable,
+        isolated_cwd,
+        clean_environment,
+        "task.wait",
+        {
+            "arguments": {
+                "home": str(home),
+                "task_id": task_id,
+                "timeout_seconds": 10,
+            }
+        },
+    )
+    assert waited["result"]["state"] == "succeeded"
     task = _call(
         executable,
         isolated_cwd,
@@ -558,7 +573,7 @@ def test_installed_cli_agent_acceptance_from_empty_home(  # noqa: PLR0915
         },
     )
     assert resumed_task_events["result"]["items"][-1]["type"] == "task.succeeded"
-    waited = _call(
+    waited_again = _call(
         executable,
         isolated_cwd,
         clean_environment,
@@ -571,7 +586,7 @@ def test_installed_cli_agent_acceptance_from_empty_home(  # noqa: PLR0915
             }
         },
     )
-    assert waited["result"]["state"] == "succeeded"
+    assert waited_again["result"]["state"] == "succeeded"
     cancelled = _call(
         executable,
         isolated_cwd,

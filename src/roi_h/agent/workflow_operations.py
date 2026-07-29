@@ -55,7 +55,7 @@ def system_doctor(request: CommandRequest) -> dict[str, Any]:
     result: dict[str, Any] = {
         "version": __version__,
         "python": f"{sys.version_info.major}.{sys.version_info.minor}",
-        "home_initialized": (home / "home.json").is_file(),
+        "home_initialized": (home / "config.json").is_file(),
         "project": None,
         "checks": runtime_checks,
         "runtime": runtime.to_dict(),

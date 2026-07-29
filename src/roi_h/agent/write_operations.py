@@ -7,12 +7,11 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
-from roi_h.agent.contract import CommandContext, CommandResult, DestructivePlan
+from roi_h.agent.contract import CommandContext, CommandResult, DestructivePlan, StructuredError
 from roi_h.agent.tasks import TaskStore
 from roi_h.harness.application import RunSession
 from roi_h.harness.atomicfs import atomic_write_json
 from roi_h.harness.domain import InvocationIdentity
-from roi_h.harness.store_lifecycle import StoreLifecycle
 from roi_h.harness.workspace import (
     Workspace,
     create_project,
@@ -91,26 +90,41 @@ def project_delete_apply(request: CommandRequest) -> dict[str, Any]:
 
 
 def store_backup(request: CommandRequest) -> dict[str, Any]:
-    """Create a consistent backup through a durable task."""
+    """Schedule a consistent backup in a detached worker."""
     workspace = Workspace.open(
         request.arguments.get("home"),
         project=request.context.project or request.arguments.get("project"),
         env=request.context.environment or request.arguments.get("environment"),
     )
     request_id = request.request_id or f"req_{uuid4().hex}"
-    tasks = TaskStore(request.arguments.get("home"))
-    task = tasks.begin("store.backup", request_id)
-    result = StoreLifecycle().backup(workspace, str(request.arguments.get("output") or ""))
-    safe_result = _safe(result.to_dict())
-    terminal = CommandResult(
-        operation="store.backup",
-        request_id=request_id,
-        ok=True,
-        changed=True,
-        context=CommandContext(project=workspace.project, environment=workspace.env),
-        result=safe_result,
+    home = resolve_home(request.arguments.get("home"))
+    tasks = TaskStore(home)
+    task = tasks.begin(
+        "store.backup",
+        request_id,
+        request={
+            "arguments": {**request.arguments, "home": str(home)},
+            "context": request.context.model_dump(mode="json"),
+        },
     )
-    task = tasks.succeed(task, terminal)
+    try:
+        tasks.launch(task)
+    except Exception as exc:
+        failed = CommandResult(
+            operation="store.backup",
+            request_id=request_id,
+            ok=False,
+            changed=False,
+            context=CommandContext(project=workspace.project, environment=workspace.env),
+            error=StructuredError(
+                code="operation.failed",
+                category="internal",
+                message=f"{type(exc).__name__}: {exc}",
+                retryable=False,
+            ),
+        )
+        tasks.fail(task, failed)
+        raise
     return {"task": task.model_dump(mode="json")}
 
 

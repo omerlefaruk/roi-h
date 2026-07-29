@@ -9,7 +9,7 @@ from roi_h.harness.diagnostics import DiagnosticSink
 from roi_h.harness.loader import load_skills, resolve_skills_root
 from roi_h.harness.retention import RetentionPlanner
 from roi_h.harness.run_storage import RunStorage
-from roi_h.harness.secrets import list_secrets
+from roi_h.harness.secrets import get_secret, list_secrets
 from roi_h.harness.store_lifecycle import StoreLifecycle
 from roi_h.harness.workspace import Workspace
 from roi_h.observer.activegraph_adapter import ActiveGraphProjectionAdapter
@@ -270,15 +270,34 @@ def secret_list(request: CommandRequest) -> dict[str, Any]:
 
 
 def secret_status(request: CommandRequest) -> dict[str, Any]:
-    """Show names-only status for one secret."""
+    """Show names-only declaration and provider status for one secret."""
     name = _name(request)
     data = secret_list(request)
+    declared = name in data["names"]
+    available = False
+    provider_error: str | None = None
+    if declared:
+        try:
+            available = get_secret(_workspace(request), name) is not None
+        except RuntimeError as exc:
+            provider_error = str(exc)
     return {
         "name": name,
-        "configured": name in data["names"],
+        "configured": declared,
+        "available": available,
+        "status": (
+            "available"
+            if available
+            else "provider_error"
+            if provider_error
+            else "missing"
+            if declared
+            else "undeclared"
+        ),
         "project": data["project"],
         "environment": data["environment"],
         "provider": data["provider"],
+        "provider_error": provider_error,
     }
 
 

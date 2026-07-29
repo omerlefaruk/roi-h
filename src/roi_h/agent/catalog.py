@@ -41,6 +41,7 @@ from roi_h.agent.read_operations import (
     tool_list,
     tool_show,
 )
+from roi_h.agent.schemas import input_schema, output_schema
 from roi_h.agent.tasks import task_cancel, task_events, task_list, task_show, task_wait
 from roi_h.agent.workflow_operations import (
     artifact_export,
@@ -93,6 +94,7 @@ from roi_h.agent.write_operations import (
     tool_invoke,
 )
 from roi_h.harness.workspace import Workspace, list_projects
+from roi_h.observer.activegraph_adapter import ActiveGraphProjectionAdapter
 
 OperationHandler = Callable[[CommandRequest], dict[str, Any]]
 
@@ -392,7 +394,11 @@ def build_catalog() -> OperationCatalog:
             "List projects without physical paths.",
             _project_list,
             pagination=True,
-            properties={"home": {"type": ["string", "null"]}},
+            properties={
+                "home": {"type": ["string", "null"]},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+                "cursor": {"type": ["string", "null"]},
+            },
         )
     )
     for operation_id, description, handler in (
@@ -736,13 +742,14 @@ def _operation(  # noqa: PLR0913 - Descriptor fields stay explicit at registrati
     pagination: bool = False,
     properties: dict[str, Any] | None = None,
     secret_input_paths: list[str] | None = None,
+    execution_mode: ExecutionMode = ExecutionMode.SYNC,
 ) -> OperationDefinition:
     return OperationDefinition(
         manifest=OperationManifest(
             operation_id=operation_id,
             description=description,
-            input_schema=_object_schema(properties or {}),
-            output_schema=_object_schema({}, allow_additional=True),
+            input_schema=input_schema(operation_id, properties or {}),
+            output_schema=output_schema(operation_id),
             effect=effect,
             idempotency=idempotency,
             approval_rule="none",
@@ -751,24 +758,15 @@ def _operation(  # noqa: PLR0913 - Descriptor fields stay explicit at registrati
             filesystem_requirements=[],
             network_requirements=[],
             pagination=pagination,
-            execution_mode=ExecutionMode.SYNC,
-            timeout_seconds=30,
+            execution_mode=(
+                ExecutionMode.TASK if operation_id == "store.backup" else execution_mode
+            ),
+            timeout_seconds=3600
+            if operation_id == "store.backup" or execution_mode is ExecutionMode.TASK
+            else 30,
         ),
         handler=handler,
     )
-
-
-def _object_schema(
-    properties: dict[str, Any],
-    *,
-    allow_additional: bool = False,
-) -> dict[str, Any]:
-    return {
-        "$schema": JSON_SCHEMA_DIALECT,
-        "type": "object",
-        "properties": properties,
-        "additionalProperties": allow_additional,
-    }
 
 
 def _system_version(_request: CommandRequest) -> dict[str, Any]:
@@ -796,13 +794,35 @@ def _system_context(request: CommandRequest) -> dict[str, Any]:
         project=arguments.get("project"),
         env=arguments.get("environment"),
     )
+    recent_runs: list[dict[str, Any]] = []
+    pending_approvals: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    if workspace.db.is_file():
+        adapter = ActiveGraphProjectionAdapter(workspace.db)
+        for header in adapter.list_run_headers(limit=10):
+            recent_runs.append(
+                {
+                    "run_id": str(header["run_id"]),
+                    "created_at": str(header.get("created_at") or ""),
+                    "goal": str(header.get("goal") or header.get("label") or ""),
+                }
+            )
+            projection = adapter.project_run(str(header["run_id"]))
+            pending_approvals.extend(
+                item
+                for item in projection["objects"]
+                if item.get("type") == "rpa.approval"
+                and item.get("data", {}).get("status") == "pending"
+            )
+    else:
+        warnings.append("The selected environment has no run store yet.")
     return {
         "project": workspace.project,
         "project_id": workspace.project_id,
         "environment": workspace.env,
-        "health_warnings": [],
-        "recent_runs": [],
-        "pending_approvals": [],
+        "health_warnings": warnings,
+        "recent_runs": recent_runs,
+        "pending_approvals": pending_approvals,
         "safe_next_actions": [
             {"operation": "tool.list"},
             {"operation": "run.list"},
@@ -813,7 +833,23 @@ def _system_context(request: CommandRequest) -> dict[str, Any]:
 def _project_list(request: CommandRequest) -> dict[str, Any]:
     items = list_projects(request.arguments.get("home"))
     safe_items = [{key: value for key, value in item.items() if key != "path"} for item in items]
-    return {"items": safe_items, "count": len(safe_items)}
+    limit = min(int(request.arguments.get("limit") or 50), 200)
+    cursor = request.arguments.get("cursor")
+    offset = 0
+    if cursor is not None:
+        if not isinstance(cursor, str) or not cursor.startswith("offset:"):
+            message = "cursor is invalid"
+            raise ValueError(message)
+        offset = int(cursor.removeprefix("offset:"))
+    selected = safe_items[offset : offset + limit]
+    has_more = offset + limit < len(safe_items)
+    return {
+        "items": selected,
+        "count": len(safe_items),
+        "next_cursor": f"offset:{offset + limit}" if has_more else None,
+        "has_more": has_more,
+        "snapshot": f"projects:{len(safe_items)}",
+    }
 
 
 __all__ = [

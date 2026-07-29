@@ -69,8 +69,15 @@ def test_store_backup_task_can_be_resumed_by_event_id(tmp_path: Path) -> None:
     )
     assert backup.returncode == 0, backup.stdout
     task = json.loads(backup.stdout)["result"]["task"]
-    assert task["state"] == "succeeded"
+    assert task["state"] in {"queued", "working"}
     task_id = task["task_id"]
+
+    waited = _call(
+        "task.wait",
+        {"home": home, "task_id": task_id, "timeout_seconds": 10},
+        cwd=tmp_path,
+    )
+    assert json.loads(waited.stdout)["result"]["state"] == "succeeded"
 
     events = _call(
         "task.events",

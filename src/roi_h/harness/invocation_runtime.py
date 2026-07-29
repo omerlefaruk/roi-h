@@ -565,11 +565,7 @@ def _worker_environment(
         "ROI_H_BROWSER_CONNECT_TIMEOUT_MS",
     }
     env.update(
-        {
-            key: value
-            for key, value in os.environ.items()
-            if key.upper() in browser_environment
-        }
+        {key: value for key, value in os.environ.items() if key.upper() in browser_environment}
     )
     env.update(
         {
@@ -578,6 +574,7 @@ def _worker_environment(
             "ROI_H_ENV": workspace.env,
             "ROI_H_RUN_ID": run_id,
             "ROI_H_IDEMPOTENCY_KEY": idempotency_key,
+            "ROI_H_DB": str(workspace.db),
             "ROI_H_EXTERNAL_IO_MODE": "runtime_recorded",
             "ROI_H_RUN_DIR": str(paths.work),
             "ROI_H_RUN_INPUT": str(paths.input),

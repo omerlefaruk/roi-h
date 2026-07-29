@@ -134,8 +134,7 @@ def inspect_isolated_runtime_bootstrap(
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         checks = tuple(
-            _failed_check(name, type(exc).__name__, str(exc))
-            for name in ("socket", "tls")
+            _failed_check(name, type(exc).__name__, str(exc)) for name in ("socket", "tls")
         )
         return RuntimeBootstrapReport(healthy=False, checks=checks)
 
@@ -144,8 +143,7 @@ def inspect_isolated_runtime_bootstrap(
     except json.JSONDecodeError:
         error = completed.stderr.strip() or completed.stdout.strip() or "probe returned no JSON"
         checks = tuple(
-            _failed_check(name, "RuntimeProbeError", error)
-            for name in ("socket", "tls")
+            _failed_check(name, "RuntimeProbeError", error) for name in ("socket", "tls")
         )
         return RuntimeBootstrapReport(healthy=False, checks=checks)
 

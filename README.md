@@ -3,10 +3,24 @@
 External AI agents use the installed CLI. See the
 [external AI CLI operator guide](docs/external-ai-cli-operator-guide.md).
 
-ROI-H is a durable RPA automation core on `activegraph==1.10.0`.
-ActiveGraph owns lifecycle, authority decisions, approvals, budgets, events, persistence,
-replay, and observability. ROI-H adds a skills catalog, isolated skill execution,
-checkpointed phases, immutable automation packages, and a compact operator interface.
+ROI-H helps an AI discover a business workflow in development, keeps side effects under
+operator approval, and turns the successful run into a versioned automation for safe
+production use.
+
+The main path is:
+
+```text
+AI-assisted discovery → approved execution → evidence → immutable automation → audited production run
+```
+
+ROI-H is built on `activegraph==1.10.0`. ActiveGraph owns lifecycle, authority decisions,
+approvals, budgets, events, persistence, replay, and observability. ROI-H adds a skills
+catalog, isolated skill execution, checkpointed phases, immutable automation packages,
+and a compact operator interface.
+
+The first target workflow is a browser and file workflow: open a portal, download a
+report, validate or transform it, save an artifact, ship the package, and run it again.
+See [`docs/product-direction.md`](docs/product-direction.md) for the product focus.
 
 ## Workflow
 
