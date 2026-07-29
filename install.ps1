@@ -7,9 +7,9 @@ Set-StrictMode -Version Latest
 $uvVersion = "0.11.16"
 $uvInstallerSha256 = "a885d46d3105506fdabc1febd2673313968605c8434e17e5841750cb20b28989"
 $pythonVersion = "3.12.13"
-$defaultInstallerVersion = "0.1.1"
-$defaultReleaseBundleUrl = "https://github.com/omerlefaruk/roi-h/releases/download/v0.1.1/roi-h-release-windows-x86_64-0.1.1.tar.gz"
-$defaultReleaseBundleSha256 = "bc5b7af6a142f34fb176121c5d50b5cb281611623d6471e2386c3d86e507c62b"
+$defaultInstallerVersion = "0.1.2"
+$defaultReleaseBundleUrl = "https://github.com/omerlefaruk/roi-h/releases/download/v0.1.2/roi-h-release-windows-x86_64-0.1.2.tar.gz"
+$defaultReleaseBundleSha256 = "c62c069b44a538d06357bd6ffc4eca5eec6386b0d4395ab02850afccbca50896"
 
 function Stop-Install {
     param([Parameter(Mandatory = $true)][string]$Message)

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
+import sys
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -13,6 +13,25 @@ from types import TracebackType
 from typing import IO, Self
 
 from roi_h.harness.workspace import Workspace
+
+if sys.platform == "win32":
+    import msvcrt
+
+    def _acquire_lock(stream: IO[str]) -> None:
+        stream.seek(0)
+        msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+
+    def _release_lock(stream: IO[str]) -> None:
+        stream.seek(0)
+        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+else:
+    import fcntl
+
+    def _acquire_lock(stream: IO[str]) -> None:
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def _release_lock(stream: IO[str]) -> None:
+        fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
 @dataclass
@@ -31,12 +50,15 @@ class RunLease:
         deadline = time.monotonic() + self.timeout_seconds
         while True:
             try:
-                fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                _acquire_lock(stream)
                 break
-            except BlockingIOError:
+            except OSError:
                 if time.monotonic() >= deadline:
                     stream.seek(0)
-                    holder = stream.read().strip() or "unknown holder"
+                    try:
+                        holder = stream.read().strip() or "unknown holder"
+                    except OSError:
+                        holder = "unknown holder"
                     stream.close()
                     msg = f"run lease is busy: {self.path} ({holder})"
                     raise RuntimeError(msg) from None
@@ -69,7 +91,7 @@ class RunLease:
         stream = self._stream
         if stream is None:
             return
-        fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+        _release_lock(stream)
         stream.close()
         self._stream = None
 
