@@ -159,7 +159,7 @@ def tool_invoke(request: CommandRequest) -> dict[str, Any]:
     token = hashlib.sha256(key.encode()).hexdigest()
     identity = InvocationIdentity(
         invocation_id=f"inv_{token[:24]}",
-        idempotency_key=f"agent:{session.runtime.run_id}:{key}",
+        idempotency_key=f"roi-h:{session.runtime.run_id}:{key}",
     )
     supplied = request.arguments.get("arguments") or {}
     if not isinstance(supplied, dict):
