@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -103,6 +104,25 @@ class Dispatcher:
                     result=dict(replay["result"]),
                     warnings=["Returned the first result for this idempotency key."],
                 )
+            claim = _claim_idempotency(operation_id, request)
+            if claim is not None:
+                if claim.get("fingerprint") != _request_fingerprint(operation_id, request):
+                    return _failure(
+                        operation_id,
+                        request_id,
+                        "request.idempotency_conflict",
+                        "conflict",
+                        "The idempotency key was already used with different arguments.",
+                    )
+                return _failure(
+                    operation_id,
+                    request_id,
+                    "request.in_progress",
+                    "conflict",
+                    "The first request is still running or has an unknown outcome.",
+                    retryable=True,
+                    retry_after_ms=500,
+                )
             result = self.catalog.execute(operation_id, request)
             invalid_output = _schema_failure(
                 operation_id,
@@ -114,8 +134,10 @@ class Dispatcher:
                 root="result",
             )
             if invalid_output is not None:
+                _release_idempotency(operation_id, request)
                 return invalid_output
         except KeyError as exc:
+            _release_idempotency(operation_id, request)
             return _failure(
                 operation_id,
                 request_id,
@@ -124,6 +146,7 @@ class Dispatcher:
                 str(exc.args[0]),
             )
         except (FileNotFoundError, ValueError, TypeError, RuntimeError, OSError) as exc:
+            _release_idempotency(operation_id, request)
             return _mapped_failure(operation_id, request_id, exc)
         response = CommandResult(
             operation=operation_id,
@@ -182,6 +205,8 @@ def _failure(  # noqa: PLR0913 - error contract fields stay explicit.
     message: str,
     *,
     details: dict[str, Any] | None = None,
+    retryable: bool = False,
+    retry_after_ms: int | None = None,
 ) -> CommandResult:
     return CommandResult(
         operation=operation_id,
@@ -192,7 +217,8 @@ def _failure(  # noqa: PLR0913 - error contract fields stay explicit.
             code=code,
             category=category,
             message=message,
-            retryable=False,
+            retryable=retryable,
+            retry_after_ms=retry_after_ms,
             details=details or {},
         ),
     )
@@ -245,25 +271,68 @@ def _idempotency_replay(
     return raw if isinstance(raw, dict) else None
 
 
+def _claim_idempotency(
+    operation_id: str,
+    request: CommandRequest,
+) -> dict[str, Any] | None:
+    """Claim one effect before execution so a crash cannot silently replay it."""
+    path = _idempotency_path(operation_id, request)
+    if path is None:
+        return None
+    lock = path.with_suffix(".lock")
+    lock.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fingerprint = _request_fingerprint(operation_id, request)
+    try:
+        descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        try:
+            raw = json.loads(lock.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {"fingerprint": fingerprint}
+        return raw if isinstance(raw, dict) else {"fingerprint": fingerprint}
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(
+            {
+                "operation": operation_id,
+                "fingerprint": fingerprint,
+                "request_id": request.request_id,
+                "pid": os.getpid(),
+            },
+            stream,
+            sort_keys=True,
+        )
+        stream.flush()
+        os.fsync(stream.fileno())
+    return None
+
+
+def _release_idempotency(operation_id: str, request: CommandRequest) -> None:
+    path = _idempotency_path(operation_id, request)
+    if path is not None:
+        path.with_suffix(".lock").unlink(missing_ok=True)
+
+
 def _save_idempotency(
     operation_id: str,
     request: CommandRequest,
     result: CommandResult,
 ) -> None:
     path = _idempotency_path(operation_id, request)
-    if path is None or result.result is None:
+    if path is None:
         return
-    atomic_write_json(
-        path,
-        {
-            "operation": operation_id,
-            "fingerprint": _request_fingerprint(operation_id, request),
-            "changed": result.changed,
-            "context": result.context.model_dump(mode="json"),
-            "result": result.result,
-        },
-        mode=0o600,
-    )
+    if result.result is not None:
+        atomic_write_json(
+            path,
+            {
+                "operation": operation_id,
+                "fingerprint": _request_fingerprint(operation_id, request),
+                "changed": result.changed,
+                "context": result.context.model_dump(mode="json"),
+                "result": result.result,
+            },
+            mode=0o600,
+        )
+    _release_idempotency(operation_id, request)
 
 
 def _idempotency_path(operation_id: str, request: CommandRequest) -> Path | None:

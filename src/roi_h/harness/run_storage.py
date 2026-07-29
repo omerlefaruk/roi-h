@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from roi_h.harness.atomicfs import atomic_write_json
+from roi_h.harness.atomicfs import atomic_write_json, hash_file
 from roi_h.harness.logical_paths import LogicalPath, PathResolver, PathScope
 from roi_h.harness.workspace import Workspace
 
@@ -155,7 +155,7 @@ class RunStorage:
         dest_name = name or source_path.name
         _validate_artifact_name(dest_name)
 
-        digest, byte_count = _hash_file(source_path)
+        digest, byte_count = hash_file(source_path)
         same_name = next(
             (item for item in self.list(run_id) if item.name == dest_name),
             None,
@@ -221,7 +221,7 @@ class RunStorage:
                 or path.name.startswith(_STAGING_PREFIX)
             ):
                 continue
-            digest, size = _hash_file(path)
+            digest, size = hash_file(path)
             artifact_id, name = match.groups()
             items.append(
                 ArtifactAttachment(
@@ -397,16 +397,6 @@ def _validate_artifact_name(name: str) -> None:
     ):
         msg = f"invalid artifact name: {name!r}"
         raise ValueError(msg)
-
-
-def _hash_file(path: Path) -> tuple[str, int]:
-    digest = hashlib.sha256()
-    size = 0
-    with path.open("rb") as stream:
-        while chunk := stream.read(1024 * 1024):
-            digest.update(chunk)
-            size += len(chunk)
-    return f"sha256:{digest.hexdigest()}", size
 
 
 def _sync_directory(path: Path) -> None:

@@ -10,11 +10,11 @@ version: 0.1.0
 ## Tools
 | Tool | Notes |
 |---|---|
-| `feedback.record` | Write a JSONL entry under project feedback/ |
-| `feedback.list` | List recent feedback entries |
+| `feedback.record` | Return an entry identity for run feedback |
+| `feedback.list` | List feedback objects from the current ActiveGraph run |
 
 ## When to use
-- Automatically after `rpa run` (harness calls `feedback.record` if installed)
+- Automatically after `rpa run` (the harness records the feedback object in ActiveGraph)
 - Manually after a messy explore session to capture lessons
 
 ## What to capture

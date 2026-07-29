@@ -218,6 +218,7 @@ ERROR_CODES = frozenset(
         "project.layout_migration_required",
         "project.not_found",
         "request.idempotency_conflict",
+        "request.in_progress",
         "request.invalid",
         "retention.plan_stale",
         "secret.missing",

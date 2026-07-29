@@ -17,6 +17,7 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
+from roi_h.harness.atomicfs import hash_file
 from roi_h.harness.store_lifecycle import StoreLifecycle
 from roi_h.harness.workspace import (
     HOME_LAYOUT_VERSION,
@@ -161,7 +162,7 @@ class ProjectArchive:
                 strict_timestamps=False,
             ) as archive:
                 for archive_path, source, kind in sorted(entries):
-                    digest, size = _hash_file(source)
+                    digest, size = hash_file(source)
                     info = zipfile.ZipInfo(archive_path)
                     info.compress_type = zipfile.ZIP_DEFLATED
                     info.external_attr = 0o600 << 16
@@ -221,7 +222,7 @@ class ProjectArchive:
             _verify_archive(stage_archive)
             stage_archive.chmod(0o600)
             stage_archive.replace(target)
-            digest, size = _hash_file(target)
+            digest, size = hash_file(target)
         finally:
             if staging_dir.exists():
                 shutil.rmtree(staging_dir)
@@ -570,16 +571,6 @@ def _contains_project_skills(manifest: dict[str, Any]) -> bool:
         for item in manifest.get("files") or []
         if isinstance(item, dict)
     )
-
-
-def _hash_file(path: Path) -> tuple[str, int]:
-    digest = hashlib.sha256()
-    size = 0
-    with path.open("rb") as stream:
-        while chunk := stream.read(1024 * 1024):
-            digest.update(chunk)
-            size += len(chunk)
-    return f"sha256:{digest.hexdigest()}", size
 
 
 def _roi_h_version() -> str:

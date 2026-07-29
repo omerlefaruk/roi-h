@@ -58,7 +58,13 @@ def test_agent_describe_and_call_use_one_json_contract(tmp_path: Path) -> None:
             "environment": None,
             "run_id": None,
         },
-        "result": {"items": [], "count": 0},
+        "result": {
+            "items": [],
+            "count": 0,
+            "next_cursor": None,
+            "has_more": False,
+            "snapshot": "projects:0",
+        },
         "warnings": [],
         "next_actions": [],
         "error": None,
@@ -166,6 +172,8 @@ def test_agent_doctors_report_isolated_socket_and_tls_health(tmp_path: Path) -> 
         )
         assert called.returncode == 0, called.stdout
         result = json.loads(called.stdout)["result"]
+        if operation == "system.doctor":
+            assert result["home_initialized"] is True
         assert result["runtime"]["healthy"] is True
         assert result["checks"]["runtime_socket_bootstrap"] is True
         assert result["checks"]["runtime_tls_bootstrap"] is True
