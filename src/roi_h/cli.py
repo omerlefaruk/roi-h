@@ -73,12 +73,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
     if raw_argv[:1] == ["agent"]:
         return agent_main(raw_argv[1:])
+    rewrites: dict[tuple[str, ...], tuple[str, ...]] = {
+        ("rpa", "project", "delete", "plan"): ("rpa", "project", "delete-plan"),
+        ("rpa", "project", "delete", "apply"): ("rpa", "project", "delete-apply"),
+        ("rpa", "store", "restore", "plan"): ("rpa", "store", "restore-plan"),
+        ("rpa", "store", "restore", "apply"): ("rpa", "store", "restore-apply"),
+        ("rpa", "store", "migrate", "plan"): ("rpa", "store", "migrate-plan"),
+        ("rpa", "store", "migrate", "apply"): ("rpa", "store", "migrate-apply"),
+        ("rpa", "store", "compact", "plan"): ("rpa", "store", "compact-plan"),
+        ("rpa", "store", "compact", "apply"): ("rpa", "store", "compact-apply"),
+    }
+    replacement = rewrites.get(tuple(raw_argv[:4]))
+    if replacement is not None:
+        raw_argv = [*replacement, *raw_argv[4:]]
     parser = _build_parser()
     if raw_argv[:4] == ["rpa", "run", "input", "add"]:
         raw_argv = ["rpa", "input", "add", *raw_argv[4:]]
     elif raw_argv[:3] == ["rpa", "run", "files"]:
         raw_argv = ["rpa", "files", *raw_argv[3:]]
     args = parser.parse_args(raw_argv)
+    deprecation = getattr(args, "deprecation", None)
+    if deprecation:
+        sys.stderr.write(f"Deprecated: {deprecation}\n")
     try:
         result = args.handler(args)
     except (
@@ -122,6 +138,14 @@ def _build_parser() -> argparse.ArgumentParser:
         diagnostic_show.add_argument("--home", default=None)
         diagnostic_show.add_argument("--limit", type=int, default=100)
         diagnostic_show.set_defaults(handler=_cmd_diagnostics_show)
+    diagnostic_bundle = diagnostics_sub.add_parser("bundle")
+    diagnostic_bundle.add_argument("--home", default=None)
+    diagnostic_bundle.add_argument("--project", default=None)
+    diagnostic_bundle.add_argument("--env", choices=["dev", "prod"], default=None)
+    diagnostic_bundle.add_argument("--output", required=True)
+    diagnostic_bundle.add_argument("--limit", type=int, default=200)
+    diagnostic_bundle.add_argument("--idempotency-key", default=None)
+    diagnostic_bundle.set_defaults(handler=_cmd_support_bundle)
 
     # project
     project = rpa_sub.add_parser("project", help="Create, list, and switch named projects")
@@ -206,7 +230,19 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Required confirmation flag",
     )
     project_delete.add_argument("--home", default=None)
-    project_delete.set_defaults(handler=_cmd_project_delete)
+    project_delete.set_defaults(
+        handler=_cmd_project_delete,
+        deprecation="use 'rpa project delete plan' and 'rpa project delete apply'",
+    )
+    project_delete_plan = project_sub.add_parser("delete-plan", help=argparse.SUPPRESS)
+    project_delete_plan.add_argument("name")
+    project_delete_plan.add_argument("--home", default=None)
+    project_delete_plan.set_defaults(handler=_cmd_project_delete_plan)
+    project_delete_apply = project_sub.add_parser("delete-apply", help=argparse.SUPPRESS)
+    project_delete_apply.add_argument("plan_id")
+    project_delete_apply.add_argument("--home", default=None)
+    project_delete_apply.add_argument("--idempotency-key", default=None)
+    project_delete_apply.set_defaults(handler=_cmd_project_delete_apply)
 
     project_rename = project_sub.add_parser("rename", help="Rename a project")
     project_rename.add_argument("name")
@@ -256,14 +292,49 @@ def _build_parser() -> argparse.ArgumentParser:
     store_restore = store_sub.add_parser("restore")
     _add_workspace_options(store_restore)
     store_restore.add_argument("source")
-    store_restore.set_defaults(handler=_cmd_store_restore)
+    store_restore.set_defaults(
+        handler=_cmd_store_restore,
+        deprecation="use 'rpa store restore plan' and 'rpa store restore apply'",
+    )
     store_migrate = store_sub.add_parser("migrate")
     _add_workspace_options(store_migrate)
-    store_migrate.set_defaults(handler=_cmd_store_migrate)
+    store_migrate.set_defaults(
+        handler=_cmd_store_migrate,
+        deprecation="use 'rpa store migrate plan' and 'rpa store migrate apply'",
+    )
     store_compact = store_sub.add_parser("compact")
     _add_workspace_options(store_compact)
     store_compact.add_argument("--apply", action="store_true")
-    store_compact.set_defaults(handler=_cmd_store_compact)
+    store_compact.set_defaults(
+        handler=_cmd_store_compact,
+        deprecation="use 'rpa store compact plan' and 'rpa store compact apply'",
+    )
+    store_restore_plan = store_sub.add_parser("restore-plan", help=argparse.SUPPRESS)
+    _add_workspace_options(store_restore_plan)
+    store_restore_plan.add_argument("source")
+    store_restore_plan.set_defaults(handler=_cmd_store_guarded)
+    store_restore_apply = store_sub.add_parser("restore-apply", help=argparse.SUPPRESS)
+    _add_workspace_options(store_restore_apply)
+    store_restore_apply.add_argument("plan_id")
+    store_restore_apply.add_argument("--idempotency-key", default=None)
+    store_restore_apply.set_defaults(handler=_cmd_store_guarded)
+    store_migrate_plan = store_sub.add_parser("migrate-plan", help=argparse.SUPPRESS)
+    _add_workspace_options(store_migrate_plan)
+    store_migrate_plan.add_argument("--target", default="current")
+    store_migrate_plan.set_defaults(handler=_cmd_store_guarded)
+    store_migrate_apply = store_sub.add_parser("migrate-apply", help=argparse.SUPPRESS)
+    _add_workspace_options(store_migrate_apply)
+    store_migrate_apply.add_argument("plan_id")
+    store_migrate_apply.add_argument("--idempotency-key", default=None)
+    store_migrate_apply.set_defaults(handler=_cmd_store_guarded)
+    store_compact_plan = store_sub.add_parser("compact-plan", help=argparse.SUPPRESS)
+    _add_workspace_options(store_compact_plan)
+    store_compact_plan.set_defaults(handler=_cmd_store_guarded)
+    store_compact_apply = store_sub.add_parser("compact-apply", help=argparse.SUPPRESS)
+    _add_workspace_options(store_compact_apply)
+    store_compact_apply.add_argument("plan_id")
+    store_compact_apply.add_argument("--idempotency-key", default=None)
+    store_compact_apply.set_defaults(handler=_cmd_store_guarded)
 
     # tools
     tools = rpa_sub.add_parser("tools", help="List global + project tools")
@@ -336,7 +407,10 @@ def _build_parser() -> argparse.ArgumentParser:
     # status
     status = rpa_sub.add_parser("status", help="Run summary + approvals + artifacts + advice")
     _add_run_options(status)
-    status.set_defaults(handler=_cmd_status)
+    status.set_defaults(
+        handler=_cmd_status,
+        deprecation="use 'rpa runs show RUN_ID'",
+    )
 
     observer = rpa_sub.add_parser("ui", help="Open the local read-only run observer")
     _configure_ui_parser(observer)
@@ -344,7 +418,10 @@ def _build_parser() -> argparse.ArgumentParser:
     cancel = rpa_sub.add_parser("cancel", help="Request cooperative run cancellation")
     _add_run_options(cancel)
     cancel.add_argument("--reason", default="operator requested cancellation")
-    cancel.set_defaults(handler=_cmd_cancel)
+    cancel.set_defaults(
+        handler=_cmd_cancel,
+        deprecation="use 'rpa runs cancel RUN_ID'",
+    )
 
     reconcile = rpa_sub.add_parser(
         "reconcile",
@@ -367,19 +444,48 @@ def _build_parser() -> argparse.ArgumentParser:
     custom.add_argument("--description", default="")
     custom.add_argument("--script", default=None)
     custom.add_argument("--overwrite", action="store_true")
-    custom.set_defaults(handler=_cmd_custom)
+    custom.set_defaults(
+        handler=_cmd_custom,
+        deprecation="use 'rpa skill define SKILL TOOL'",
+    )
 
     # approvals
     approvals = rpa_sub.add_parser("approvals", help="List pending tool approvals")
     _add_run_options(approvals)
     approvals.add_argument("--status", default="pending", choices=["pending", "all"])
-    approvals.set_defaults(handler=_cmd_approvals)
+    approvals.set_defaults(
+        handler=_cmd_approvals,
+        deprecation="use 'rpa approval list'",
+    )
 
     approve = rpa_sub.add_parser("approve", help="Grant a pending approval and execute the tool")
     _add_run_options(approve)
     approve.add_argument("approval_id")
     approve.add_argument("--by", default="user")
-    approve.set_defaults(handler=_cmd_approve)
+    approve.set_defaults(
+        handler=_cmd_approve,
+        deprecation="use 'rpa approval approve APPROVAL_ID'",
+    )
+
+    approval = rpa_sub.add_parser("approval", help="Inspect and decide run approvals")
+    approval_sub = approval.add_subparsers(dest="approval_command", required=True)
+    approval_list = approval_sub.add_parser("list")
+    _add_run_options(approval_list)
+    approval_list.add_argument("--limit", type=int, default=50)
+    approval_list.add_argument("--cursor", default=None)
+    approval_list.set_defaults(handler=_cmd_approval_operation)
+    approval_show = approval_sub.add_parser("show")
+    _add_run_options(approval_show)
+    approval_show.add_argument("approval_id")
+    approval_show.set_defaults(handler=_cmd_approval_operation)
+    for command in ("approve", "reject"):
+        approval_decision = approval_sub.add_parser(command)
+        _add_run_options(approval_decision)
+        approval_decision.add_argument("approval_id")
+        approval_decision.add_argument("--by", default="user")
+        approval_decision.add_argument("--reason", default="")
+        approval_decision.add_argument("--idempotency-key", default=None)
+        approval_decision.set_defaults(handler=_cmd_approval_operation)
 
     # artifacts
     artifacts = rpa_sub.add_parser("artifact", help="Manage run file artifacts")
@@ -535,7 +641,10 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Automatic feedback.record policy (default: on in dev, off in prod)",
     )
-    run_cmd.set_defaults(handler=_cmd_run)
+    run_cmd.set_defaults(
+        handler=_cmd_run,
+        deprecation="use 'rpa automation run NAME'",
+    )
 
     # ship: publish + push (+ optional prod dry-run)
     ship = rpa_sub.add_parser(
@@ -570,7 +679,10 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="set_args",
         help="Arg overrides for optional prod dry-run/run",
     )
-    ship.set_defaults(handler=_cmd_ship)
+    ship.set_defaults(
+        handler=_cmd_ship,
+        deprecation="use 'rpa automation ship'",
+    )
 
     # secrets
     secrets = rpa_sub.add_parser("secret", help="Project secrets (values never printed)")
@@ -599,7 +711,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     autos = rpa_sub.add_parser("automations", help="List versioned automations in this env")
     _add_workspace_options(autos)
-    autos.set_defaults(handler=_cmd_automations)
+    autos.set_defaults(
+        handler=_cmd_automations,
+        deprecation="use 'rpa automation list'",
+    )
 
     runs = rpa_sub.add_parser("runs", help="Find and inspect durable runs")
     runs_sub = runs.add_subparsers(dest="runs_command", required=True)
@@ -654,6 +769,15 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_workspace_options(skill_list)
     _add_skills_option(skill_list)
     skill_list.set_defaults(handler=_cmd_skill_list)
+    skill_define = skill_sub.add_parser("define")
+    _add_workspace_options(skill_define)
+    skill_define.add_argument("skill")
+    skill_define.add_argument("tool")
+    skill_define.add_argument("--description", default="")
+    skill_define.add_argument("--script", default=None)
+    skill_define.add_argument("--overwrite", action="store_true")
+    skill_define.add_argument("--idempotency-key", default=None)
+    skill_define.set_defaults(handler=_cmd_skill_define)
     for command in ("show", "validate"):
         skill_show = skill_sub.add_parser(command)
         _add_workspace_options(skill_show)
@@ -702,6 +826,41 @@ def _build_parser() -> argparse.ArgumentParser:
     automation_compare.add_argument("version_a")
     automation_compare.add_argument("version_b")
     automation_compare.set_defaults(handler=_cmd_automation_compare)
+    automation_ship = automation_sub.add_parser("ship")
+    _add_workspace_options(automation_ship)
+    _add_skills_option(automation_ship)
+    automation_ship.add_argument("--name", required=True)
+    automation_ship.add_argument("--version", required=True)
+    automation_ship.add_argument("--from-run", required=True, dest="from_run")
+    automation_ship.add_argument("--goal", default="")
+    automation_ship.add_argument("--notes", default="")
+    automation_ship.add_argument("--skill", action="append", default=None)
+    automation_ship.add_argument(
+        "--distill",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    automation_ship.add_argument("--no-prod-dry-run", action="store_true", help=argparse.SUPPRESS)
+    automation_ship.add_argument("--idempotency-key", default=None)
+    automation_ship.set_defaults(handler=_cmd_automation_ship)
+    automation_run = automation_sub.add_parser("run")
+    _add_workspace_options(automation_run)
+    _add_skills_option(automation_run)
+    automation_run.add_argument("name")
+    automation_run.add_argument("--version", default=None)
+    automation_run.add_argument("--run-id", default=None)
+    automation_run.add_argument("--dry-run", action="store_true")
+    automation_run.add_argument("--from-handoff", default=None)
+    automation_run.add_argument(
+        "--auto-approve",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    automation_run.add_argument("--no-force", action="store_true")
+    automation_run.add_argument("--actor", default="recipe")
+    automation_run.add_argument("--set", action="append", default=None, dest="set_args")
+    automation_run.add_argument("--idempotency-key", default=None)
+    automation_run.set_defaults(handler=_cmd_automation_run)
 
     return parser
 
@@ -851,6 +1010,14 @@ def _cmd_project_create(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def _cmd_project_delete_plan(args: argparse.Namespace) -> dict[str, Any]:
+    return _call_operation(args, "project.delete.plan", name=args.name)
+
+
+def _cmd_project_delete_apply(args: argparse.Namespace) -> dict[str, Any]:
+    return _call_operation(args, "project.delete.apply", plan_id=args.plan_id)
+
+
 def _cmd_project_use(args: argparse.Namespace) -> dict[str, Any]:
     return set_active_project(args.home, args.name)
 
@@ -933,6 +1100,17 @@ def _cmd_store_compact(args: argparse.Namespace) -> dict[str, Any]:
         )
         .to_dict()
     )
+
+
+def _cmd_store_guarded(args: argparse.Namespace) -> dict[str, Any]:
+    command = args.store_command
+    operation = f"store.{command.replace('-', '.')}"
+    values: dict[str, object] = {}
+    for key in ("source", "plan_id", "target"):
+        value = getattr(args, key, None)
+        if value is not None:
+            values[key] = value
+    return _call_operation(args, operation, **values)
 
 
 def _cmd_tools(args: argparse.Namespace) -> dict[str, Any]:
@@ -1097,6 +1275,15 @@ def _cmd_diagnostics_show(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _cmd_support_bundle(args: argparse.Namespace) -> dict[str, Any]:
+    return _call_operation(
+        args,
+        "support_bundle.create",
+        output=args.output,
+        limit=args.limit,
+    )
+
+
 def _operation_arguments(
     args: argparse.Namespace,
     **values: object,
@@ -1186,6 +1373,21 @@ def _cmd_skill_list(args: argparse.Namespace) -> dict[str, Any]:
     return _call_operation(args, "skill.list")
 
 
+def _cmd_skill_define(args: argparse.Namespace) -> dict[str, Any]:
+    source = sys.stdin.read() if args.script == "-" else None
+    source_path = args.script if args.script not in {None, "-"} else None
+    return _call_operation(
+        args,
+        "skill.define",
+        skill=args.skill,
+        tool=args.tool,
+        description=args.description,
+        source=source,
+        source_path=source_path,
+        overwrite=args.overwrite,
+    )
+
+
 def _cmd_skill_show(args: argparse.Namespace) -> dict[str, Any]:
     return _call_operation(args, f"skill.{args.skill_command}", name=args.name)
 
@@ -1228,6 +1430,54 @@ def _cmd_automation_compare(args: argparse.Namespace) -> dict[str, Any]:
         name=args.name,
         version_a=args.version_a,
         version_b=args.version_b,
+    )
+
+
+def _cmd_automation_ship(args: argparse.Namespace) -> dict[str, Any]:
+    return _call_operation(
+        args,
+        "automation.ship",
+        name=args.name,
+        version=args.version,
+        from_run=args.from_run,
+        goal=args.goal,
+        notes=args.notes,
+        skills_list=args.skill,
+        distill=args.distill,
+    )
+
+
+def _cmd_automation_run(args: argparse.Namespace) -> dict[str, Any]:
+    return _call_operation(
+        args,
+        "automation.run",
+        name=args.name,
+        version=args.version,
+        run_id=args.run_id,
+        dry_run=args.dry_run,
+        from_handoff=args.from_handoff,
+        auto_approve=args.auto_approve,
+        force=not args.no_force,
+        actor=args.actor,
+        set_args=args.set_args,
+    )
+
+
+def _cmd_approval_operation(args: argparse.Namespace) -> dict[str, Any]:
+    values: dict[str, object] = {
+        "run_id": args.run_id,
+        "limit": getattr(args, "limit", 50),
+        "cursor": getattr(args, "cursor", None),
+    }
+    if hasattr(args, "approval_id"):
+        values["approval_id"] = args.approval_id
+    if args.approval_command in {"approve", "reject"}:
+        values["by"] = args.by
+        values["reason"] = args.reason
+    return _call_operation(
+        args,
+        f"approval.{args.approval_command}",
+        **values,
     )
 
 

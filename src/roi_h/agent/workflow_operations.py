@@ -504,6 +504,7 @@ def automation_run(request: CommandRequest) -> dict[str, Any]:
             run_id=_optional_string(request, "run_id"),
             skills_root=_optional_string(request, "skills"),
             dry_run=request.arguments.get("dry_run") is True,
+            from_handoff=_optional_string(request, "from_handoff"),
             auto_approve=request.arguments.get("auto_approve"),
             force=request.arguments.get("force") is not False,
             actor=str(request.arguments.get("actor") or "agent"),

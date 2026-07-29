@@ -341,6 +341,7 @@ def test_cli_ship_then_run_dry_and_live(tmp_path: Path) -> None:
 
     shipped = _roi_h(
         "rpa",
+        "automation",
         "ship",
         "--home",
         home,
@@ -361,6 +362,7 @@ def test_cli_ship_then_run_dry_and_live(tmp_path: Path) -> None:
 
     dry = _roi_h(
         "rpa",
+        "automation",
         "run",
         "cli-job",
         "--home",
@@ -382,6 +384,7 @@ def test_cli_ship_then_run_dry_and_live(tmp_path: Path) -> None:
 
     live = _roi_h(
         "rpa",
+        "automation",
         "run",
         "cli-job",
         "--home",

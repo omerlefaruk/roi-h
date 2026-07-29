@@ -224,10 +224,9 @@ def test_human_skill_promote_and_delete_plan_apply(tmp_path: Path) -> None:
     assert init.returncode == 0, init.stderr
     define = _roi_h(
         "rpa",
-        "custom",
-        "--skill",
+        "skill",
+        "define",
         "sample",
-        "--tool",
         "work",
         "--home",
         home,
@@ -263,3 +262,168 @@ def test_human_skill_promote_and_delete_plan_apply(tmp_path: Path) -> None:
     )
     assert applied.returncode == 0, applied.stderr
     assert json.loads(applied.stdout)["recoverable"] is True
+
+
+def test_human_approval_reject_and_support_bundle_commands(tmp_path: Path) -> None:
+    home = str(tmp_path / ".roi-h")
+    skills = str(default_skills_root())
+    init = _roi_h("rpa", "project", "create", "demo", "--home", home, cwd=tmp_path)
+    assert init.returncode == 0, init.stderr
+    start = _roi_h(
+        "rpa",
+        "start",
+        "--home",
+        home,
+        "--skills",
+        skills,
+        "--run-id",
+        "human-approval-run",
+        "--goal",
+        "Reject an approval",
+        cwd=tmp_path,
+    )
+    assert start.returncode == 0, start.stderr
+    invoke = _roi_h(
+        "rpa",
+        "invoke",
+        "--home",
+        home,
+        "--skills",
+        skills,
+        "--run-id",
+        "human-approval-run",
+        "browser",
+        "navigate",
+        "--args",
+        '{"url":"https://example.com/"}',
+        cwd=tmp_path,
+    )
+    assert invoke.returncode == 1, invoke.stderr
+    approval_id = json.loads(invoke.stdout)["approval_id"]
+
+    rejected = _roi_h(
+        "rpa",
+        "approval",
+        "reject",
+        approval_id,
+        "--run-id",
+        "human-approval-run",
+        "--home",
+        home,
+        "--skills",
+        skills,
+        "--reason",
+        "not required",
+        cwd=tmp_path,
+    )
+    assert rejected.returncode == 0, rejected.stderr
+    assert json.loads(rejected.stdout)["status"] == "denied"
+
+    bundle = tmp_path / "support.zip"
+    supported = _roi_h(
+        "diagnostics",
+        "bundle",
+        "--home",
+        home,
+        "--output",
+        str(bundle),
+        cwd=tmp_path,
+    )
+    assert supported.returncode == 0, supported.stderr
+    assert bundle.is_file()
+
+
+def test_human_destructive_commands_use_plan_and_apply(tmp_path: Path) -> None:
+    home = str(tmp_path / ".roi-h")
+    init = _roi_h("rpa", "project", "create", "demo", "--home", home, cwd=tmp_path)
+    assert init.returncode == 0, init.stderr
+    start = _roi_h(
+        "rpa",
+        "start",
+        "--home",
+        home,
+        "--run-id",
+        "plan-run",
+        "--goal",
+        "Create a store",
+        cwd=tmp_path,
+    )
+    assert start.returncode == 0, start.stderr
+    backup_path = tmp_path / "store.sqlite"
+    backup = _roi_h(
+        "rpa",
+        "store",
+        "backup",
+        "--home",
+        home,
+        "--output",
+        str(backup_path),
+        cwd=tmp_path,
+    )
+    assert backup.returncode == 0, backup.stderr
+
+    restore_plan = _roi_h(
+        "rpa",
+        "store",
+        "restore",
+        "plan",
+        str(backup_path),
+        "--home",
+        home,
+        cwd=tmp_path,
+    )
+    assert restore_plan.returncode == 0, restore_plan.stderr
+    restore_plan_id = json.loads(restore_plan.stdout)["plan_id"]
+    restore_apply = _roi_h(
+        "rpa",
+        "store",
+        "restore",
+        "apply",
+        restore_plan_id,
+        "--home",
+        home,
+        cwd=tmp_path,
+    )
+    assert restore_apply.returncode == 0, restore_apply.stderr
+
+    for command in (("migrate", "plan"), ("compact", "plan")):
+        planned = _roi_h("rpa", "store", *command, "--home", home, cwd=tmp_path)
+        assert planned.returncode == 0, (command, planned.stdout, planned.stderr)
+        assert json.loads(planned.stdout)["plan_id"].startswith("plan_")
+
+    delete_plan = _roi_h(
+        "rpa",
+        "project",
+        "delete",
+        "plan",
+        "demo",
+        "--home",
+        home,
+        cwd=tmp_path,
+    )
+    assert delete_plan.returncode == 0, delete_plan.stderr
+    delete_plan_id = json.loads(delete_plan.stdout)["plan_id"]
+    delete_apply = _roi_h(
+        "rpa",
+        "project",
+        "delete",
+        "apply",
+        delete_plan_id,
+        "--home",
+        home,
+        cwd=tmp_path,
+    )
+    assert delete_apply.returncode == 0, delete_apply.stderr
+
+
+def test_compatibility_command_prints_deprecation_only_to_stderr(tmp_path: Path) -> None:
+    home = str(tmp_path / ".roi-h")
+    init = _roi_h("rpa", "project", "create", "demo", "--home", home, cwd=tmp_path)
+    assert init.returncode == 0, init.stderr
+
+    result = _roi_h("rpa", "automations", "--home", home, cwd=tmp_path)
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout)["ok"] is True
+    assert "deprecated" in result.stderr.lower()
+    assert "deprecated" not in result.stdout.lower()
