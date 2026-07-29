@@ -144,7 +144,7 @@ try {
     if ($LASTEXITCODE -ne 0) {
         Stop-Install "The release bundle cannot be inspected."
     }
-    if ($members.Count -ne $memberDetails.Count) {
+    if (@($members).Length -ne @($memberDetails).Length) {
         Stop-Install "The release bundle member list is inconsistent."
     }
     foreach ($detail in $memberDetails) {
@@ -152,7 +152,7 @@ try {
             Stop-Install "The release bundle contains a non-regular entry."
         }
     }
-    if (@($members | Group-Object | Where-Object Count -gt 1).Count -ne 0) {
+    if (@($members | Group-Object | Where-Object Count -gt 1).Length -ne 0) {
         Stop-Install "The release bundle contains duplicate entries."
     }
     foreach ($member in $members) {
@@ -163,10 +163,10 @@ try {
             Stop-Install "The release bundle contains an unsafe entry."
         }
     }
-    if (@($members | Where-Object { $_ -eq "release.json" }).Count -ne 1) {
+    if (@($members | Where-Object { $_ -eq "release.json" }).Length -ne 1) {
         Stop-Install "The release bundle must contain one release.json file."
     }
-    if (@($members | Where-Object { $_ -like "*.whl" }).Count -lt 1) {
+    if (@($members | Where-Object { $_ -like "*.whl" }).Length -lt 1) {
         Stop-Install "The release bundle must contain at least one wheel."
     }
     $null = New-Item -ItemType Directory -Path $releaseRoot
