@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from roi_h.harness.atomicfs import atomic_write_json
 from roi_h.harness.workspace import Workspace
@@ -178,6 +179,156 @@ class MacOSKeychainSecretStore:
         return True
 
 
+class LinuxSecretServiceStore:
+    """Linux Secret Service adapter through the standard secret-tool client."""
+
+    provider = "linux-secret-service"
+    service = "dev.roi-h.secrets"
+
+    def list_names(self, project_id: str, environment: str) -> list[SecretMetadata]:
+        del project_id, environment
+        return []
+
+    def get(self, project_id: str, environment: str, name: str) -> str | None:
+        executable = _secret_tool()
+        completed = subprocess.run(  # noqa: S603
+            [
+                executable,
+                "lookup",
+                "service",
+                self.service,
+                "account",
+                _identity(project_id, environment, name),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if completed.returncode == 1:
+            return None
+        if completed.returncode != 0:
+            msg = "secret.provider_failed: Linux Secret Service read failed"
+            raise RuntimeError(msg)
+        return completed.stdout.rstrip("\n")
+
+    def set(
+        self,
+        project_id: str,
+        environment: str,
+        name: str,
+        value: str,
+    ) -> SecretMetadata:
+        completed = subprocess.run(  # noqa: S603
+            [
+                _secret_tool(),
+                "store",
+                "--label",
+                f"ROI-H {name}",
+                "service",
+                self.service,
+                "account",
+                _identity(project_id, environment, name),
+            ],
+            check=False,
+            capture_output=True,
+            input=value,
+            text=True,
+            timeout=15,
+        )
+        if completed.returncode != 0:
+            msg = "secret.provider_failed: Linux Secret Service write failed"
+            raise RuntimeError(msg)
+        return SecretMetadata(name, project_id, environment, self.provider)
+
+    def delete(self, project_id: str, environment: str, name: str) -> bool:
+        completed = subprocess.run(  # noqa: S603
+            [
+                _secret_tool(),
+                "clear",
+                "service",
+                self.service,
+                "account",
+                _identity(project_id, environment, name),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if completed.returncode == 1:
+            return False
+        if completed.returncode != 0:
+            msg = "secret.provider_failed: Linux Secret Service delete failed"
+            raise RuntimeError(msg)
+        return True
+
+
+class WindowsCredentialSecretStore:
+    """Windows Credential Manager adapter through native Win32 calls."""
+
+    provider = "windows-credential-manager"
+    service = "dev.roi-h.secrets"
+
+    def list_names(self, project_id: str, environment: str) -> list[SecretMetadata]:
+        del project_id, environment
+        return []
+
+    def get(self, project_id: str, environment: str, name: str) -> str | None:
+        ctypes, credential_type, api = _windows_credential_api()
+        pointer = ctypes.POINTER(credential_type)()
+        target = _windows_target(project_id, environment, name)
+        if not api.CredReadW(target, 1, 0, ctypes.byref(pointer)):
+            if ctypes.get_last_error() == 1168:
+                return None
+            msg = "secret.provider_failed: Windows Credential Manager read failed"
+            raise RuntimeError(msg)
+        try:
+            credential = pointer.contents
+            raw = ctypes.string_at(
+                credential.CredentialBlob,
+                credential.CredentialBlobSize,
+            )
+            return cast("str", raw.decode("utf-16-le"))
+        finally:
+            api.CredFree(pointer)
+
+    def set(
+        self,
+        project_id: str,
+        environment: str,
+        name: str,
+        value: str,
+    ) -> SecretMetadata:
+        ctypes, credential_type, api = _windows_credential_api()
+        raw = value.encode("utf-16-le")
+        buffer = ctypes.create_string_buffer(raw)
+        credential = credential_type()
+        credential.Type = 1
+        credential.TargetName = _windows_target(project_id, environment, name)
+        credential.CredentialBlobSize = len(raw)
+        credential.CredentialBlob = ctypes.cast(
+            buffer,
+            ctypes.POINTER(ctypes.c_ubyte),
+        )
+        credential.Persist = 2
+        credential.UserName = name
+        if not api.CredWriteW(ctypes.byref(credential), 0):
+            msg = "secret.provider_failed: Windows Credential Manager write failed"
+            raise RuntimeError(msg)
+        return SecretMetadata(name, project_id, environment, self.provider)
+
+    def delete(self, project_id: str, environment: str, name: str) -> bool:
+        ctypes, _credential_type, api = _windows_credential_api()
+        target = _windows_target(project_id, environment, name)
+        if api.CredDeleteW(target, 1, 0):
+            return True
+        if ctypes.get_last_error() == 1168:
+            return False
+        msg = "secret.provider_failed: Windows Credential Manager delete failed"
+        raise RuntimeError(msg)
+
+
 def secrets_path(workspace: Workspace) -> Path:
     """Return names-only secret metadata; values never live here."""
     return workspace.project_root / "secrets.meta.json"
@@ -341,6 +492,10 @@ def _store(provider: str) -> SecretStore:
         return EnvironmentSecretStore()
     if provider == "macos-keychain":
         return MacOSKeychainSecretStore()
+    if provider == "linux-secret-service":
+        return LinuxSecretServiceStore()
+    if provider == "windows-credential-manager":
+        return WindowsCredentialSecretStore()
     msg = f"secret.provider_failed: unsupported provider {provider!r}"
     raise RuntimeError(msg)
 
@@ -398,11 +553,49 @@ def _environment_key(project_id: str, environment: str, name: str) -> str:
     )
 
 
+def _secret_tool() -> str:
+    executable = shutil.which("secret-tool")
+    if executable is None:
+        msg = "secret.provider_failed: secret-tool is not installed"
+        raise RuntimeError(msg)
+    return executable
+
+
+def _windows_target(project_id: str, environment: str, name: str) -> str:
+    return f"ROI-H:{_identity(project_id, environment, name)}"
+
+
+def _windows_credential_api() -> tuple[Any, type[Any], Any]:
+    import ctypes  # noqa: PLC0415
+    from ctypes import wintypes  # noqa: PLC0415
+
+    class Credential(ctypes.Structure):
+        _fields_ = [
+            ("Flags", wintypes.DWORD),
+            ("Type", wintypes.DWORD),
+            ("TargetName", wintypes.LPWSTR),
+            ("Comment", wintypes.LPWSTR),
+            ("LastWritten", wintypes.FILETIME),
+            ("CredentialBlobSize", wintypes.DWORD),
+            ("CredentialBlob", ctypes.POINTER(ctypes.c_ubyte)),
+            ("Persist", wintypes.DWORD),
+            ("AttributeCount", wintypes.DWORD),
+            ("Attributes", wintypes.LPVOID),
+            ("TargetAlias", wintypes.LPWSTR),
+            ("UserName", wintypes.LPWSTR),
+        ]
+
+    loader = ctypes.WinDLL  # type: ignore[attr-defined]
+    return ctypes, Credential, loader("Advapi32.dll", use_last_error=True)
+
+
 __all__ = [
     "EnvironmentSecretStore",
+    "LinuxSecretServiceStore",
     "MacOSKeychainSecretStore",
     "SecretMetadata",
     "SecretStore",
+    "WindowsCredentialSecretStore",
     "delete_secret",
     "get_secret",
     "inject_secrets_into_environ",

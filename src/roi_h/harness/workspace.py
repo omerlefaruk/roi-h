@@ -223,7 +223,15 @@ def create_project(
             staging / "secrets.meta.json",
             {
                 "schema_version": 1,
-                "provider": ("macos-keychain" if sys.platform == "darwin" else "environment"),
+                "provider": (
+                    "macos-keychain"
+                    if sys.platform == "darwin"
+                    else (
+                        "windows-credential-manager"
+                        if sys.platform == "win32"
+                        else "linux-secret-service"
+                    )
+                ),
                 "entries": [],
             },
             mode=0o600,
