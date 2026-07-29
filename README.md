@@ -53,7 +53,11 @@ repository or Python distribution.
 The authoritative data-home and project-storage rules are in
 [`docs/project-storage-activegraph-refactor.md`](docs/project-storage-activegraph-refactor.md);
 application distribution and publication boundaries are in
-[`docs/distribution-and-updates.md`](docs/distribution-and-updates.md).
+[`docs/distribution-and-updates.md`](docs/distribution-and-updates.md); and the stable
+external-AI CLI plan is in
+[`docs/external-ai-cli-plan.md`](docs/external-ai-cli-plan.md). Its paste-ready
+implementation handoff is in
+[`docs/handoffs/external-ai-cli-implementation-handoff.md`](docs/handoffs/external-ai-cli-implementation-handoff.md).
 
 Published versions are immutable, digest-verified snapshots. `ship` is the only CLI
 publishing journey; `run` executes its straight-line recipe. Advanced ActiveGraph

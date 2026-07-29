@@ -432,7 +432,8 @@ Before the installer is advertised, ROI-H must implement:
 already have a documented recoverable uninstall path.
 
 These commands are an external product interface. Their machine-readable results and exit
-codes should be stable and covered by tests.
+codes should be stable and covered by tests. The common contract and operation catalog
+are defined in [`external-ai-cli-plan.md`](external-ai-cli-plan.md).
 
 ## Acceptance criteria
 

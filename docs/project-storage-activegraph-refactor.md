@@ -2089,6 +2089,11 @@ Commands must distinguish:
 
 ## 28. CLI Target
 
+This section defines the storage command groups. The versioned machine contract,
+operation catalog, safe retry rules, and optional MCP adapter are defined in
+[`external-ai-cli-plan.md`](external-ai-cli-plan.md). New CLI work must follow both
+documents.
+
 ### Project
 
 ```shell
