@@ -42,6 +42,7 @@ def main(argv: Sequence[str]) -> int:
         else:
             operation = str(args.operation)
             request = _read_request(str(args.input))
+            request = _add_secure_secret_input(args, operation, request)
             request_id = request.request_id
             result = dispatcher.execute(operation, request)
     except (AgentUsageError, json.JSONDecodeError, ValidationError, UnicodeError, OSError) as exc:
@@ -71,6 +72,7 @@ def _parser() -> _MachineParser:
     call = sub.add_parser("call", add_help=False)
     call.add_argument("operation")
     call.add_argument("--input", required=True)
+    call.add_argument("--secret-stdin", action="store_true")
     return parser
 
 
@@ -82,6 +84,30 @@ def _read_request(source: str) -> CommandRequest:
         raw = path.read_text(encoding="utf-8")
     value = json.loads(raw)
     return CommandRequest.model_validate(value)
+
+
+def _add_secure_secret_input(
+    args: argparse.Namespace,
+    operation: str,
+    request: CommandRequest,
+) -> CommandRequest:
+    if operation != "secret.set":
+        if args.secret_stdin:
+            message = "--secret-stdin is only valid for secret.set"
+            raise AgentUsageError(message)
+        return request
+    if not args.secret_stdin:
+        message = "secret.set requires --secret-stdin"
+        raise AgentUsageError(message)
+    if str(args.input) == "-":
+        message = "secret.set requires a request file and separate secret stdin"
+        raise AgentUsageError(message)
+    if "secret_value" in request.arguments:
+        message = "secret_value is not accepted in the request document"
+        raise AgentUsageError(message)
+    return request.model_copy(
+        update={"arguments": {**request.arguments, "secret_value": sys.stdin.read()}}
+    )
 
 
 def _context_arguments(args: argparse.Namespace) -> dict[str, str]:

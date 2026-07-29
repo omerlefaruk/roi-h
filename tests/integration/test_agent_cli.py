@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 
 def _agent(
@@ -153,3 +154,51 @@ def test_agent_can_find_and_explain_a_run_without_sql(tmp_path: Path) -> None:
         result = json.loads(called.stdout)["result"]
         assert result["run_id"] == "agent-read-run"
         assert str(tmp_path) not in called.stdout
+
+
+def test_agent_secret_set_uses_a_separate_standard_input_channel(tmp_path: Path) -> None:
+    home = str(tmp_path / "home")
+    create_request = tmp_path / "create.json"
+    create_request.write_text(
+        json.dumps(
+            {
+                "idempotency_key": "create-secret-project",
+                "arguments": {"home": home, "name": "demo"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    created = _agent(
+        "call",
+        "project.create",
+        "--input",
+        str(create_request),
+        cwd=tmp_path,
+    )
+    assert created.returncode == 0, created.stdout
+
+    request_path = tmp_path / "secret-request.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "idempotency_key": "set-token",
+                "context": {"project": "demo", "environment": "dev"},
+                "arguments": {"home": home, "name": "TOKEN"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    secret = f"value-{uuid4().hex}"
+    called = _agent(
+        "call",
+        "secret.set",
+        "--input",
+        str(request_path),
+        "--secret-stdin",
+        cwd=tmp_path,
+        stdin=secret,
+    )
+    assert called.returncode == 0, called.stdout
+    assert secret not in called.stdout
+    assert secret not in called.stderr
+    assert json.loads(called.stdout)["result"]["name"] == "TOKEN"
