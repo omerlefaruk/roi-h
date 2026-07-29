@@ -27,6 +27,9 @@ def test_powershell_bootstrap_matches_the_pinned_install_contract() -> None:
     assert "System.IO.Compression.ZipFile" not in script
     assert "release.json" in script
     assert "*.whl" in script
+    assert "@($members | Group-Object | Where-Object Count -gt 1).Count" in script
+    assert '@($members | Where-Object { $_ -eq "release.json" }).Count' in script
+    assert '@($members | Where-Object { $_ -like "*.whl" }).Count' in script
     assert '"roi-h-installer==$installerVersion"' in script
     assert "--no-index" in script
     assert "--find-links $releaseRoot" in script
