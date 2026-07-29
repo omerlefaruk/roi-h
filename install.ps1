@@ -9,7 +9,7 @@ $uvInstallerSha256 = "a885d46d3105506fdabc1febd2673313968605c8434e17e5841750cb20
 $pythonVersion = "3.12.13"
 $defaultInstallerVersion = "0.1.0"
 $defaultReleaseBundleUrl = "https://get.roi-h.dev/releases/stable/roi-h-release-0.1.0.tar.gz"
-$defaultReleaseBundleSha256 = "92c66971acda05937764c35023e494de82172e38fb0bc733a7666f7bd1be0660"
+$defaultReleaseBundleSha256 = "ce2ea82cae5e43ee526ac5a437193f2c562877023699c3e860f6e56940c4cf40"
 
 function Stop-Install {
     param([Parameter(Mandatory = $true)][string]$Message)

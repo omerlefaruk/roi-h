@@ -13,7 +13,7 @@ def test_powershell_bootstrap_matches_the_pinned_install_contract() -> None:
     assert '$defaultInstallerVersion = "0.1.0"' in script
     assert (
         "$defaultReleaseBundleSha256 = "
-        '"92c66971acda05937764c35023e494de82172e38fb0bc733a7666f7bd1be0660"' in script
+        '"ce2ea82cae5e43ee526ac5a437193f2c562877023699c3e860f6e56940c4cf40"' in script
     )
     assert "$env:ROI_H_INSTALLER_VERSION" in script
     assert "$env:ROI_H_RELEASE_BUNDLE_URL" in script

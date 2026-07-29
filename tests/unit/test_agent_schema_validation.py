@@ -35,9 +35,7 @@ def test_dispatcher_rejects_arguments_that_do_not_match_input_schema() -> None:
 
 
 def test_dispatcher_rejects_handler_output_that_does_not_match_schema() -> None:
-    dispatcher = Dispatcher(
-        _catalog(lambda _request: {"value": 12}, output_type="string")
-    )
+    dispatcher = Dispatcher(_catalog(lambda _request: {"value": 12}, output_type="string"))
     result = dispatcher.execute(
         "test.schema",
         CommandRequest(arguments={"value": "valid"}),

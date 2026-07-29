@@ -11,7 +11,7 @@ import sys
 import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 from roi_h import __version__
@@ -37,8 +37,6 @@ from roi_h.harness.workspace import (
 if TYPE_CHECKING:
     from roi_h.agent.contract import CommandRequest
     from roi_h.harness.application import RunSession
-
-T = TypeVar("T")
 
 
 def system_doctor(request: CommandRequest) -> dict[str, Any]:
@@ -214,12 +212,16 @@ def _project_import_replace_apply(home: Path, plan_id: str) -> dict[str, Any]:
     previous = trash / f"{name}-{uuid4().hex}"
     target.replace(previous)
     try:
-        imported = ProjectArchive().import_archive(
-            source,
-            home,
-            name=name,
-            use=False,
-        ).to_dict()
+        imported = (
+            ProjectArchive()
+            .import_archive(
+                source,
+                home,
+                name=name,
+                use=False,
+            )
+            .to_dict()
+        )
     except Exception:
         if not target.exists():
             previous.replace(target)
@@ -867,7 +869,7 @@ def _strip_physical_paths(value: object) -> dict[str, Any]:
     return safe
 
 
-def _safe(value: T) -> T:
+def _safe[T](value: T) -> T:
     if isinstance(value, Path):
         return cast("T", value.name)
     if isinstance(value, dict):

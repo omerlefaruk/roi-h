@@ -54,9 +54,7 @@ def test_installed_cli_agent_acceptance_from_empty_home(  # noqa: PLR0915
         capture_output=True,
         check=False,
     )
-    assert create_environment.returncode == 0, (
-        create_environment.stdout + create_environment.stderr
-    )
+    assert create_environment.returncode == 0, create_environment.stdout + create_environment.stderr
     python = environment / "bin" / "python"
     install = subprocess.run(  # noqa: S603
         [
@@ -657,8 +655,7 @@ def test_installed_cli_agent_acceptance_from_empty_home(  # noqa: PLR0915
     assert support["result"]["created"] is True
     with zipfile.ZipFile(tmp_path / "support.zip") as archive:
         support_text = "\n".join(
-            archive.read(name).decode("utf-8", errors="ignore")
-            for name in archive.namelist()
+            archive.read(name).decode("utf-8", errors="ignore") for name in archive.namelist()
         )
     assert secret_value not in support_text
     event_text = json.dumps(trace) + json.dumps(event_page)

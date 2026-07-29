@@ -19,7 +19,7 @@ def test_posix_bootstrap_has_a_complete_stable_release_identity() -> None:
     )
     assert (
         'DEFAULT_RELEASE_BUNDLE_SHA256="'
-        '92c66971acda05937764c35023e494de82172e38fb0bc733a7666f7bd1be0660"' in script
+        'ce2ea82cae5e43ee526ac5a437193f2c562877023699c3e860f6e56940c4cf40"' in script
     )
 
 
