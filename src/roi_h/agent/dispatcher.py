@@ -56,6 +56,7 @@ class Dispatcher:
     def execute(self, operation_id: str, request: CommandRequest) -> CommandResult:
         """Validate, route, and wrap one operation."""
         request_id = _request_id(request.request_id)
+        request = request.model_copy(update={"request_id": request_id})
         try:
             manifest = self.catalog.describe(operation_id)[0]
             if manifest.idempotency.value == "required" and not request.idempotency_key:

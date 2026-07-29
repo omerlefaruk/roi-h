@@ -39,10 +39,12 @@ from roi_h.agent.read_operations import (
     tool_list,
     tool_show,
 )
+from roi_h.agent.tasks import task_cancel, task_events, task_list, task_show, task_wait
 from roi_h.agent.write_operations import (
     project_create,
     project_delete_apply,
     project_delete_plan,
+    store_backup,
 )
 from roi_h.harness.workspace import Workspace, list_projects
 
@@ -196,6 +198,14 @@ def build_catalog() -> OperationCatalog:
             "none",
         ),
         (
+            "store.backup",
+            "Create a consistent store backup as a durable task.",
+            store_backup,
+            Effect.WRITE,
+            Idempotency.REQUIRED,
+            "none",
+        ),
+        (
             "project.delete.plan",
             "Plan recoverable project deletion.",
             project_delete_plan,
@@ -224,6 +234,29 @@ def build_catalog() -> OperationCatalog:
                 | {
                     "display_name": {"type": ["string", "null"]},
                     "use": {"type": "boolean"},
+                },
+            )
+        )
+    for operation_id, description, handler, effect in (
+        ("task.list", "List durable tasks.", task_list, Effect.READ),
+        ("task.show", "Show one durable task.", task_show, Effect.READ),
+        ("task.events", "Read resumable task events.", task_events, Effect.READ),
+        ("task.wait", "Wait for or poll one durable task.", task_wait, Effect.READ),
+        ("task.cancel", "Cancel one durable task.", task_cancel, Effect.WRITE),
+    ):
+        catalog.register(
+            _operation(
+                operation_id,
+                description,
+                handler,
+                effect=effect,
+                idempotency=Idempotency.NOT_APPLICABLE,
+                pagination=operation_id in {"task.list", "task.events"},
+                properties=common_properties
+                | {
+                    "task_id": {"type": ["string", "null"]},
+                    "after": {"type": ["string", "null"]},
+                    "timeout_seconds": {"type": "number", "minimum": 0},
                 },
             )
         )

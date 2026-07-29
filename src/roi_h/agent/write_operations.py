@@ -7,9 +7,12 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
-from roi_h.agent.contract import DestructivePlan
+from roi_h.agent.contract import CommandContext, CommandResult, DestructivePlan
+from roi_h.agent.tasks import TaskStore
 from roi_h.harness.atomicfs import atomic_write_json
+from roi_h.harness.store_lifecycle import StoreLifecycle
 from roi_h.harness.workspace import (
+    Workspace,
     create_project,
     delete_project,
     resolve_home,
@@ -85,6 +88,30 @@ def project_delete_apply(request: CommandRequest) -> dict[str, Any]:
     return _safe(result)
 
 
+def store_backup(request: CommandRequest) -> dict[str, Any]:
+    """Create a consistent backup through a durable task."""
+    workspace = Workspace.open(
+        request.arguments.get("home"),
+        project=request.context.project or request.arguments.get("project"),
+        env=request.context.environment or request.arguments.get("environment"),
+    )
+    request_id = request.request_id or f"req_{uuid4().hex}"
+    tasks = TaskStore(request.arguments.get("home"))
+    task = tasks.begin("store.backup", request_id)
+    result = StoreLifecycle().backup(workspace, str(request.arguments.get("output") or ""))
+    safe_result = _safe(result.to_dict())
+    terminal = CommandResult(
+        operation="store.backup",
+        request_id=request_id,
+        ok=True,
+        changed=True,
+        context=CommandContext(project=workspace.project, environment=workspace.env),
+        result=safe_result,
+    )
+    task = tasks.succeed(task, terminal)
+    return {"task": task.model_dump(mode="json")}
+
+
 def _load_plan(home: Path, plan_id: str) -> DestructivePlan:
     path = _plan_path(home, plan_id)
     if not path.is_file():
@@ -147,4 +174,9 @@ def _safe_value(value: Any) -> Any:  # noqa: ANN401 - Recursive JSON values are 
     return value
 
 
-__all__ = ["project_create", "project_delete_apply", "project_delete_plan"]
+__all__ = [
+    "project_create",
+    "project_delete_apply",
+    "project_delete_plan",
+    "store_backup",
+]
