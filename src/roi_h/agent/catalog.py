@@ -41,10 +41,14 @@ from roi_h.agent.read_operations import (
 )
 from roi_h.agent.tasks import task_cancel, task_events, task_list, task_show, task_wait
 from roi_h.agent.write_operations import (
+    approval_approve,
+    approval_reject,
     project_create,
     project_delete_apply,
     project_delete_plan,
+    run_start,
     store_backup,
+    tool_invoke,
 )
 from roi_h.harness.workspace import Workspace, list_projects
 
@@ -152,6 +156,7 @@ def build_catalog() -> OperationCatalog:
         "artifact_id": {"type": ["string", "null"]},
         "plan_id": {"type": ["string", "null"]},
         "full": {"type": "boolean"},
+        "arguments": {"type": "object"},
     }
     for operation_id, description, handler, paginated in (
         ("project.show", "Show one project.", project_show, False),
@@ -201,6 +206,38 @@ def build_catalog() -> OperationCatalog:
             "store.backup",
             "Create a consistent store backup as a durable task.",
             store_backup,
+            Effect.WRITE,
+            Idempotency.REQUIRED,
+            "none",
+        ),
+        (
+            "run.start",
+            "Start one durable run.",
+            run_start,
+            Effect.WRITE,
+            Idempotency.REQUIRED,
+            "none",
+        ),
+        (
+            "tool.invoke",
+            "Invoke one tool through ActiveGraph authority.",
+            tool_invoke,
+            Effect.WRITE,
+            Idempotency.REQUIRED,
+            "none",
+        ),
+        (
+            "approval.approve",
+            "Approve and execute one deferred invocation.",
+            approval_approve,
+            Effect.WRITE,
+            Idempotency.REQUIRED,
+            "none",
+        ),
+        (
+            "approval.reject",
+            "Reject one deferred invocation without execution.",
+            approval_reject,
             Effect.WRITE,
             Idempotency.REQUIRED,
             "none",

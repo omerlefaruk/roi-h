@@ -92,3 +92,97 @@ def test_project_write_replay_conflict_and_stale_plan(tmp_path: Path) -> None:
     apply_payload = json.loads(apply.stdout)
     assert apply_payload["error"]["code"] == "plan.state_changed"
     assert (Path(home) / "projects" / "demo").is_dir()
+
+
+def test_agent_run_tool_and_approval_rejection_journey(tmp_path: Path) -> None:
+    home = str(tmp_path / "home")
+    created = _call(
+        "project.create",
+        {
+            "schema_version": "1.0",
+            "idempotency_key": "approval-project",
+            "arguments": {"home": home, "name": "demo"},
+        },
+        cwd=tmp_path,
+    )
+    assert created.returncode == 0, created.stdout
+
+    started = _call(
+        "run.start",
+        {
+            "schema_version": "1.0",
+            "idempotency_key": "approval-run",
+            "context": {"project": "demo", "environment": "dev"},
+            "arguments": {
+                "home": home,
+                "run_id": "agent-approval-run",
+                "goal": "Request and reject approval",
+            },
+        },
+        cwd=tmp_path,
+    )
+    assert started.returncode == 0, started.stdout
+
+    invoked = _call(
+        "tool.invoke",
+        {
+            "schema_version": "1.0",
+            "idempotency_key": "shell-not-approved",
+            "context": {
+                "project": "demo",
+                "environment": "dev",
+                "run_id": "agent-approval-run",
+            },
+            "arguments": {
+                "home": home,
+                "name": "shell.run",
+                "arguments": {"command": "printf should-not-run"},
+            },
+        },
+        cwd=tmp_path,
+    )
+    assert invoked.returncode == 0, invoked.stdout
+    step = json.loads(invoked.stdout)["result"]
+    assert step["status"] == "pending_approval"
+    approval_id = step["approval_id"]
+
+    rejected = _call(
+        "approval.reject",
+        {
+            "schema_version": "1.0",
+            "idempotency_key": "reject-shell",
+            "context": {
+                "project": "demo",
+                "environment": "dev",
+                "run_id": "agent-approval-run",
+            },
+            "arguments": {
+                "home": home,
+                "approval_id": approval_id,
+                "by": "operator",
+                "reason": "Not approved.",
+            },
+        },
+        cwd=tmp_path,
+    )
+    assert rejected.returncode == 0, rejected.stdout
+    assert json.loads(rejected.stdout)["result"]["status"] == "denied"
+
+    events = _call(
+        "run.events",
+        {
+            "schema_version": "1.0",
+            "context": {
+                "project": "demo",
+                "environment": "dev",
+                "run_id": "agent-approval-run",
+            },
+            "arguments": {"home": home, "limit": 200},
+        },
+        cwd=tmp_path,
+    )
+    event_types = {
+        item["type"] for item in json.loads(events.stdout)["result"]["items"]
+    }
+    assert "approval.rejected" in event_types
+    assert "tool.requested" not in event_types

@@ -9,7 +9,9 @@ from uuid import uuid4
 
 from roi_h.agent.contract import CommandContext, CommandResult, DestructivePlan
 from roi_h.agent.tasks import TaskStore
+from roi_h.harness.application import RunSession
 from roi_h.harness.atomicfs import atomic_write_json
+from roi_h.harness.domain import InvocationIdentity
 from roi_h.harness.store_lifecycle import StoreLifecycle
 from roi_h.harness.workspace import (
     Workspace,
@@ -112,6 +114,138 @@ def store_backup(request: CommandRequest) -> dict[str, Any]:
     return {"task": task.model_dump(mode="json")}
 
 
+def run_start(request: CommandRequest) -> dict[str, Any]:
+    """Create one durable ActiveGraph run."""
+    workspace = _workspace(request)
+    goal = str(request.arguments.get("goal") or "")
+    run_id = str(request.arguments.get("run_id") or "")
+    if not run_id:
+        if not request.idempotency_key:
+            msg = "run_id or idempotency_key is required"
+            raise ValueError(msg)
+        run_id = f"run_{hashlib.sha256(request.idempotency_key.encode()).hexdigest()[:24]}"
+    session = RunSession.create(
+        workspace,
+        run_id=run_id,
+        skills_root=request.arguments.get("skills"),
+        auto_approve=False,
+    )
+    run = session.start_run(
+        goal,
+        actor=str(request.arguments.get("actor") or "ai"),
+        phase_plan=request.arguments.get("phase_plan"),
+    )
+    return {
+        "run_id": session.runtime.run_id,
+        "object_id": run.id,
+        "status": "open",
+        "project": workspace.project,
+        "environment": workspace.env,
+    }
+
+
+def tool_invoke(request: CommandRequest) -> dict[str, Any]:
+    """Invoke one tool with caller-controlled ActiveGraph identity."""
+    session = _session(request)
+    name = str(request.arguments.get("name") or "")
+    skill, separator, tool = name.partition(".")
+    if not separator or not skill or not tool:
+        msg = "tool name must have the form skill.tool"
+        raise ValueError(msg)
+    key = request.idempotency_key
+    if not key:
+        msg = "idempotency_key is required"
+        raise ValueError(msg)
+    token = hashlib.sha256(key.encode()).hexdigest()
+    identity = InvocationIdentity(
+        invocation_id=f"inv_{token[:24]}",
+        idempotency_key=f"agent:{session.runtime.run_id}:{key}",
+    )
+    supplied = request.arguments.get("arguments") or {}
+    if not isinstance(supplied, dict):
+        msg = "tool arguments must be an object"
+        raise TypeError(msg)
+    _check_invocation_conflict(session, name, supplied, identity)
+    pending = next(
+        (
+            item
+            for item in session.runtime.pending_approvals()
+            if item.data.get("idempotency_key") == identity.idempotency_key
+        ),
+        None,
+    )
+    if pending is not None:
+        return {
+            "run_id": session.runtime.run_id,
+            "status": "pending_approval",
+            "approval_id": pending.id,
+            "invocation_id": identity.invocation_id,
+            "idempotency_key": identity.idempotency_key,
+        }
+    result = session.invoke(
+        skill,
+        tool,
+        supplied,
+        actor=str(request.arguments.get("actor") or "ai"),
+        force=request.arguments.get("force") is True,
+        identity=identity,
+    )
+    return result.model_dump(mode="json")
+
+
+def approval_approve(request: CommandRequest) -> dict[str, Any]:
+    """Approve and execute one deferred invocation."""
+    result = _session(request).approve(
+        str(request.arguments.get("approval_id") or ""),
+        approved_by=str(request.arguments.get("by") or "user"),
+    )
+    return result.model_dump(mode="json")
+
+
+def approval_reject(request: CommandRequest) -> dict[str, Any]:
+    """Reject one deferred invocation without execution."""
+    return _session(request).reject(
+        str(request.arguments.get("approval_id") or ""),
+        rejected_by=str(request.arguments.get("by") or "user"),
+        reason=str(request.arguments.get("reason") or ""),
+    )
+
+
+def _workspace(request: CommandRequest) -> Workspace:
+    return Workspace.open(
+        request.arguments.get("home"),
+        project=request.context.project or request.arguments.get("project"),
+        env=request.context.environment or request.arguments.get("environment"),
+    )
+
+
+def _session(request: CommandRequest) -> RunSession:
+    run_id = request.context.run_id or request.arguments.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        msg = "run_id is required"
+        raise ValueError(msg)
+    return RunSession.reopen(
+        _workspace(request),
+        run_id=run_id,
+        skills_root=request.arguments.get("skills"),
+        auto_approve=False,
+    )
+
+
+def _check_invocation_conflict(
+    session: RunSession,
+    name: str,
+    arguments: dict[str, Any],
+    identity: InvocationIdentity,
+) -> None:
+    for item in session.runtime.graph.objects(type="rpa.invocation"):
+        if item.data.get("idempotency_key") != identity.idempotency_key:
+            continue
+        if item.data.get("name") != name or dict(item.data.get("args") or {}) != arguments:
+            msg = "request.idempotency_conflict: tool arguments changed for this key"
+            raise RuntimeError(msg)
+
+
 def _load_plan(home: Path, plan_id: str) -> DestructivePlan:
     path = _plan_path(home, plan_id)
     if not path.is_file():
@@ -175,8 +309,12 @@ def _safe_value(value: Any) -> Any:  # noqa: ANN401 - Recursive JSON values are 
 
 
 __all__ = [
+    "approval_approve",
+    "approval_reject",
     "project_create",
     "project_delete_apply",
     "project_delete_plan",
+    "run_start",
     "store_backup",
+    "tool_invoke",
 ]
