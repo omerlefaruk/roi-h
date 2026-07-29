@@ -61,6 +61,10 @@ external-AI CLI plan is in
 [`docs/external-ai-cli-plan.md`](docs/external-ai-cli-plan.md). Its paste-ready
 implementation handoff is in
 [`docs/handoffs/external-ai-cli-implementation-handoff.md`](docs/handoffs/external-ai-cli-implementation-handoff.md).
+The release, installer, update, and rollback implementation plan is in
+[`docs/release-implementation-plan.md`](docs/release-implementation-plan.md), with its
+handoff in
+[`docs/handoffs/release-implementation-handoff.md`](docs/handoffs/release-implementation-handoff.md).
 
 Published versions are immutable, digest-verified snapshots. `ship` is the only CLI
 publishing journey; `run` executes its straight-line recipe. Advanced ActiveGraph

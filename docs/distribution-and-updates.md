@@ -1,7 +1,7 @@
 # ROI-H Distribution, Installation, and Updates
 
-**Status:** Accepted design; storage, publication seam, and local release gate implemented;
-installer pending
+**Status:** Accepted design; storage, publication seam, local release gate, and detailed
+implementation plan complete; installer pending
 **Audience:** Release engineers and implementation agents
 **Last updated:** 2026-07-29
 
@@ -9,6 +9,11 @@ This document is the authoritative product and implementation contract for distr
 ROI-H itself. It describes how an operator installs and updates the `roi-h` application.
 It does not describe `roi-h rpa ship`, which publishes an automation package inside an
 ROI-H workspace.
+
+The dependency-ordered implementation authority is
+[`release-implementation-plan.md`](release-implementation-plan.md). Its paste-ready
+handoff is
+[`handoffs/release-implementation-handoff.md`](handoffs/release-implementation-handoff.md).
 
 ## Decision
 
@@ -456,6 +461,11 @@ Windows, and supported Linux targets:
 - Installer output never includes secrets or registry credentials.
 
 ## Implementation sequence for agents
+
+The full deliverables, exit conditions, trust model, and tests are in
+[`release-implementation-plan.md`](release-implementation-plan.md). Use the paste-ready
+[`release implementation handoff`](handoffs/release-implementation-handoff.md) to start
+work in the isolated release worktree.
 
 Work in dependency order:
 
