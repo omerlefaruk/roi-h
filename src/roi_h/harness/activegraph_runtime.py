@@ -62,9 +62,7 @@ class ROIHRuntime(Runtime):  # type: ignore[misc]
         if not rejected or self._pack_state is None:
             return
         self._pack_state.pending_approvals[:] = [
-            item
-            for item in self._pack_state.pending_approvals
-            if item.id not in rejected
+            item for item in self._pack_state.pending_approvals if item.id not in rejected
         ]
 
 

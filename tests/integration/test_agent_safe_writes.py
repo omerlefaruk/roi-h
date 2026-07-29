@@ -181,8 +181,6 @@ def test_agent_run_tool_and_approval_rejection_journey(tmp_path: Path) -> None:
         },
         cwd=tmp_path,
     )
-    event_types = {
-        item["type"] for item in json.loads(events.stdout)["result"]["items"]
-    }
+    event_types = {item["type"] for item in json.loads(events.stdout)["result"]["items"]}
     assert "approval.rejected" in event_types
     assert "tool.requested" not in event_types
