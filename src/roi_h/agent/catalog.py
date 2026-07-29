@@ -15,7 +15,30 @@ from roi_h.agent.contract import (
     Idempotency,
     OperationManifest,
 )
-from roi_h.agent.read_operations import list_runs, run_events, run_trace, show_run
+from roi_h.agent.read_operations import (
+    approval_list,
+    approval_show,
+    artifact_list,
+    artifact_show,
+    automation_compare,
+    automation_list,
+    automation_show,
+    diagnostic_list,
+    list_runs,
+    project_show,
+    retention_show,
+    run_events,
+    run_trace,
+    secret_list,
+    secret_status,
+    show_run,
+    skill_list,
+    skill_show,
+    store_check,
+    store_status,
+    tool_list,
+    tool_show,
+)
 from roi_h.harness.workspace import Workspace, list_projects
 
 OperationHandler = Callable[[CommandRequest], dict[str, Any]]
@@ -104,6 +127,58 @@ def build_catalog() -> OperationCatalog:
                     "cursor": {"type": ["string", "null"]},
                     "after": {"type": ["string", "null"]},
                 },
+            )
+        )
+    common_properties = {
+        "home": {"type": ["string", "null"]},
+        "project": {"type": ["string", "null"]},
+        "environment": {"enum": ["dev", "prod", None]},
+        "run_id": {"type": ["string", "null"]},
+        "name": {"type": ["string", "null"]},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+        "cursor": {"type": ["string", "null"]},
+        "skills": {"type": ["string", "null"]},
+        "version": {"type": ["string", "null"]},
+        "version_a": {"type": ["string", "null"]},
+        "version_b": {"type": ["string", "null"]},
+        "approval_id": {"type": ["string", "null"]},
+        "artifact_id": {"type": ["string", "null"]},
+        "plan_id": {"type": ["string", "null"]},
+        "full": {"type": "boolean"},
+    }
+    for operation_id, description, handler, paginated in (
+        ("project.show", "Show one project.", project_show, False),
+        ("project.paths", "Show logical project paths.", project_show, False),
+        ("environment.show", "Show the selected environment.", project_show, False),
+        ("environment.doctor", "Inspect the selected environment.", project_show, False),
+        ("store.status", "Show store status.", store_status, False),
+        ("store.check", "Check the selected store.", store_check, False),
+        ("tool.list", "List tools and schemas.", tool_list, True),
+        ("tool.show", "Show one tool and its schemas.", tool_show, False),
+        ("approval.list", "List run approvals.", approval_list, True),
+        ("approval.show", "Show one run approval.", approval_show, False),
+        ("artifact.list", "List durable artifacts.", artifact_list, True),
+        ("artifact.show", "Show one durable artifact.", artifact_show, False),
+        ("skill.list", "List available skills.", skill_list, True),
+        ("skill.show", "Show one available skill.", skill_show, False),
+        ("skill.validate", "Validate one available skill.", skill_show, False),
+        ("automation.list", "List immutable automations.", automation_list, True),
+        ("automation.show", "Show one immutable automation.", automation_show, False),
+        ("automation.verify", "Verify one immutable automation.", automation_show, False),
+        ("automation.compare", "Compare two automation versions.", automation_compare, False),
+        ("secret.list", "List configured secret names.", secret_list, True),
+        ("secret.status", "Show names-only secret status.", secret_status, False),
+        ("retention.show", "Show one retention plan.", retention_show, False),
+        ("diagnostic.list", "List redacted diagnostics.", diagnostic_list, True),
+        ("diagnostic.tail", "Read the redacted diagnostic tail.", diagnostic_list, True),
+    ):
+        catalog.register(
+            _read_operation(
+                operation_id,
+                description,
+                handler,
+                pagination=paginated,
+                properties=common_properties,
             )
         )
     catalog.register(
