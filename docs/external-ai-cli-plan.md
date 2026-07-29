@@ -17,9 +17,8 @@ This document defines how Codex and other AI systems can use all supported ROI-H
 functions without reading the source code, the ActiveGraph SQLite schema, or physical
 project paths.
 
-The CLI is the main local interface. An optional MCP adapter can use the same command
-modules later. MCP is not required for Codex or for an AI system that can run a local
-process.
+The CLI is the only supported local external-AI interface. Codex and other AI systems
+use the installed `roi-h` process.
 
 ## 1. Decision
 
@@ -130,7 +129,6 @@ ROI-H will use one typed operation catalog and small domain command modules.
 flowchart TD
     H["Human CLI adapter"] --> C["Typed operation catalog and dispatcher"]
     A["Agent CLI adapter"] --> C
-    M["Optional MCP adapter"] --> C
     C --> P["Project commands"]
     C --> R["Run and phase commands"]
     C --> T["Tool and approval commands"]
@@ -526,29 +524,7 @@ Keep old forms as compatibility adapters for one documented release. Print depre
 messages only to standard error. Do not keep duplicate command trees after the
 compatibility period.
 
-## 12. Optional MCP Adapter
-
-After the operation catalog and agent CLI pass the full acceptance tests, add:
-
-```shell
-roi-h mcp serve --stdio
-```
-
-The MCP adapter generates tool definitions from the same operation descriptors:
-
-- JSON Schema becomes MCP input and output schema.
-- `read` becomes the read-only hint.
-- `destructive` becomes the destructive hint.
-- the idempotency rule becomes the idempotent hint.
-- structured results use the same result model as the CLI.
-
-The MCP adapter calls the dispatcher in the current process. It must not shell out to
-`roi-h agent call`, copy command handlers, or write logs to standard output.
-
-Codex can use the CLI directly in an open repository. An AI product with MCP support can
-use the MCP adapter. Both paths have the same effects and safety rules.
-
-## 13. Implementation Plan
+## 12. Implementation Plan
 
 The paste-ready implementation prompt is
 [`handoffs/external-ai-cli-implementation-handoff.md`](handoffs/external-ai-cli-implementation-handoff.md).
@@ -647,22 +623,6 @@ Acceptance:
 - secrets do not appear in arguments, output, logs, plans, or packages; and
 - automation packages remain immutable and digest verified.
 
-### Phase 5: Add MCP as an adapter
-
-Deliver:
-
-- `roi-h mcp serve --stdio`;
-- generated MCP tool descriptions and annotations;
-- shared authentication and context selection rules; and
-- parity tests between MCP and agent CLI results.
-
-Acceptance:
-
-- MCP and CLI call the same command module for each operation;
-- MCP standard output contains only protocol messages;
-- read, destructive, and idempotent hints match the operation catalog; and
-- no MCP-only domain behavior exists.
-
 ### Phase 6: Qualify the external-AI interface
 
 Deliver:
@@ -672,7 +632,6 @@ Deliver:
 - interruption and retry tests;
 - secret and redaction tests;
 - bounded-output tests;
-- CLI and MCP parity tests; and
 - a short operator guide for Codex, Claude, Gemini, and generic shell agents.
 
 Acceptance:
@@ -683,7 +642,7 @@ Acceptance:
 - macOS, Windows, and Linux tests use Python 3.12 only; and
 - the release gate tests the installed wheel, not only the source checkout.
 
-## 14. Suggested Commit Order
+## 13. Suggested Commit Order
 
 Keep commits small and in dependency order:
 
@@ -699,13 +658,12 @@ Keep commits small and in dependency order:
 10. Fix secret input and shared redaction.
 11. Add skill and automation lifecycle commands.
 12. Add the context command and full CLI journey tests.
-13. Add the optional MCP adapter and parity tests.
-14. Remove expired compatibility command forms before version 1.0.
+13. Remove expired compatibility command forms before version 1.0.
 
 Each commit must keep existing storage tests green. Do not combine the parser, storage,
-and MCP changes in one commit.
+and destructive-plan changes in one commit.
 
-## 15. Research Basis
+## 14. Research Basis
 
 This plan uses these primary references:
 
@@ -727,24 +685,20 @@ This plan uses these primary references:
 - [Docker password input](https://docs.docker.com/reference/cli/docker/login/)
   for secret input through standard input.
 - [JSON Schema 2020-12](https://json-schema.org/draft/2020-12) for operation contracts.
-- [MCP tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools) and
-  [MCP transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
-  for the optional adapter.
 
 The detailed research note is
 [`research/external-ai-cli-primary-research.md`](research/external-ai-cli-primary-research.md).
 
-## 16. Explicit Exclusions
+## 15. Explicit Exclusions
 
 Do not:
 
 - expose raw ActiveGraph SQLite;
 - mirror generic graph operations in the ROI-H CLI;
 - let an AI use unrestricted physical paths;
-- add a second MCP implementation of business rules;
 - put secrets in command arguments;
 - auto-read all result pages;
 - auto-approve production effects;
 - use English error text as a program contract;
 - turn the operation catalog into a universal manager or event store; or
-- block the canonical CLI on the optional MCP adapter.
+- add a second external-AI transport beside the installed CLI.

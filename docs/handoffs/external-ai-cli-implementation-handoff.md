@@ -6,8 +6,8 @@ Use this prompt in a new Codex task with the repository open at
 ## Objective
 
 Implement the complete external-AI CLI plan for ROI-H. Start with the versioned JSON
-command interface. Keep the current human CLI working. Add the optional MCP stdio adapter
-only after the CLI passes the agent-only acceptance test.
+command interface. Keep the current human CLI working. The installed CLI is the only
+external-AI transport.
 
 Do not stop after scaffolding. Work through the phases in dependency order until the full
 acceptance criteria pass, unless a real product decision or an external dependency blocks
@@ -27,7 +27,7 @@ Read these files completely, in this order:
 7. `pyproject.toml`
 
 Treat `docs/external-ai-cli-plan.md` as the authority for operation IDs, machine output,
-safe retry, command additions, task control, and MCP order. Treat the storage document as
+safe retry, command additions, and task control. Treat the storage document as
 the authority for data ownership, logical paths, ActiveGraph, portability, secrets,
 diagnostics, and retention.
 
@@ -73,11 +73,10 @@ The module interface includes schemas, effect class, retry rules, error behavior
 approval rules, task behavior, and performance limits. Its implementation can use
 internal files, but callers must only need the small interface.
 
-Use three adapters at the same seam:
+Use two adapters at the same seam:
 
 1. The current human CLI.
 2. The strict agent JSON or JSON Lines CLI.
-3. The optional MCP stdio adapter.
 
 The operation catalog and dispatcher only validate, describe, and route. Keep project,
 run, tool, approval, phase, artifact, skill, automation, secret, store, retention, and
@@ -459,22 +458,6 @@ The test must:
 
 Exit condition: the installed CLI gives full supported product access from an empty home.
 
-### Phase 7: Optional MCP stdio adapter
-
-Start this phase only after Phase 6 is green.
-
-1. Add `roi-h mcp serve --stdio`.
-2. Generate MCP tool definitions from the operation catalog.
-3. Map read, destructive, idempotent, and open-world fields to MCP annotations.
-4. Use the same handlers, schemas, approvals, plans, and errors.
-5. Keep all logs on standard error.
-6. Add CLI and MCP parity tests.
-
-Do not add Streamable HTTP in this implementation.
-
-Exit condition: CLI and MCP results are equivalent for the same operation fixtures, and
-no MCP-only business behavior exists.
-
 ## Test Rules
 
 Use test-driven changes for each new contract behavior:
@@ -523,8 +506,7 @@ Use small commits in this order:
 11. Skill lifecycle.
 12. Automation inspection.
 13. Agent-only acceptance test.
-14. Optional MCP stdio adapter.
-15. Compatibility documentation and cleanup.
+14. Compatibility documentation and cleanup.
 
 Do not combine all phases into one commit. Do not push, publish, create a release, or
 rewrite Git history unless the user gives separate authority.
@@ -554,4 +536,4 @@ Report:
 - built package-content result;
 - commits created;
 - remaining blocked items, if any; and
-- whether MCP was added or correctly deferred.
+- confirmation that the product is CLI-only.

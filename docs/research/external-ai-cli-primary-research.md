@@ -12,13 +12,13 @@ How should ROI-H expose its full product through a CLI so that an external AI ca
 
 ROI-H needs one typed operation registry. The registry must be the stable product interface. It must not expose SQLite tables or Python internals.
 
-Three adapters must use the same registry:
+Two adapters must use the same registry:
 
 1. The current human CLI.
 2. A strict JSON and JSON Lines agent interface.
-3. An optional MCP server.
 
-This design keeps one implementation of permissions, approvals, idempotency, schemas, and errors. It also prevents the CLI and MCP interface from changing in different ways.
+This design keeps one implementation of permissions, approvals, idempotency, schemas,
+and errors. The installed CLI is the only external-AI transport.
 
 The current commit has many required domain functions. It has project export and import, store maintenance, logical files, artifacts, retention plans, diagnostics, approvals, automation shipping, and a dry-run option. The main missing part is a stable machine contract around these functions.
 
@@ -106,8 +106,6 @@ An agent must never need to parse `message`. It must make decisions from `code`,
 ### 3. JSON Schema must define all inputs and outputs
 
 JSON Schema 2020-12 is the current released JSON Schema version. It defines validation rules and descriptive metadata for JSON data. [JSON Schema 2020-12](https://json-schema.org/draft/2020-12), [JSON Schema validation specification](https://json-schema.org/draft/2020-12/json-schema-validation)
-
-MCP tool definitions use an input schema and can use an output schema. MCP clients can validate structured tool results against the output schema. [MCP tool specification](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)
 
 **ROI-H decision**
 
@@ -212,7 +210,9 @@ The current `gc plan/show/apply` flow is the correct pattern. `store compact` al
 
 ### 7. Lists must be bounded and stable
 
-AWS CLI supports page size, maximum item count, and a starting token. It also separates server-side filtering from client-side queries. MCP uses opaque cursors and a `nextCursor` value. MCP task listings require cursor pagination and require clients to treat cursors as opaque. [AWS CLI pagination](https://docs.aws.amazon.com/cli/latest/userguide/cli-usage-pagination.html), [AWS CLI filtering](https://docs.aws.amazon.com/cli/latest/userguide/cli-usage-filter.html), [MCP task lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/tasks)
+AWS CLI supports page size, maximum item count, and a starting token. It also separates
+server-side filtering from client-side queries. [AWS CLI pagination](https://docs.aws.amazon.com/cli/latest/userguide/cli-usage-pagination.html),
+[AWS CLI filtering](https://docs.aws.amazon.com/cli/latest/userguide/cli-usage-filter.html)
 
 **ROI-H decision**
 
@@ -241,8 +241,6 @@ Ordering must be deterministic. The cursor must be opaque. The snapshot must pre
 Large files and artifacts must return metadata and a logical URI by default. The metadata must include size, digest, media type, and export command. ROI-H must not put large binary data in JSON.
 
 ### 8. Long operations need tasks, events, wait, and cancel
-
-MCP defines tasks with working and terminal states, progress, polling, cursor-based listing, and cancellation. It also says that clients must not depend on optional status notifications. [MCP task lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/tasks)
 
 Terraform JSON output shows how to stream typed progress events for long work. [Terraform machine-readable output](https://developer.hashicorp.com/terraform/internals/machine-readable-ui)
 
@@ -318,24 +316,6 @@ All agent calls must name the project and environment in the input or receive th
 
 Version the contract independently from the package. Breaking field removals, field type changes, new required inputs, and semantic changes require a new contract major version. Additive optional fields can use a minor version. GitHub and Stripe both use explicit API versions to control breaking behavior. [GitHub REST API versions](https://docs.github.com/en/rest/about-the-rest-api/api-versions), [Stripe API versioning](https://docs.stripe.com/api/versioning)
 
-### 11. MCP must be an adapter, not a second product API
-
-MCP tool definitions have JSON Schema inputs and outputs. Its annotations can mark a tool as read-only, destructive, idempotent, or open-world. The annotations are hints, so ROI-H must still enforce its own policy. [MCP tool schemas](https://modelcontextprotocol.io/specification/2025-11-25/server/tools), [MCP tool annotations](https://modelcontextprotocol.io/specification/2025-11-25/schema)
-
-MCP stdio reserves standard input and standard output for JSON-RPC messages. A server can write logs to standard error, but it must not write other data to standard output. Streamable HTTP also needs origin checks, local-only binding for a local service, and authentication. [MCP transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
-
-**ROI-H decision**
-
-Add this only after the registry and JSON contract are stable:
-
-```text
-roi-h mcp serve --stdio
-```
-
-Generate MCP tools from the operation registry. Map effect and idempotency fields to MCP annotations. Use the same schemas, handlers, approvals, plans, and error codes. Codex can use MCP when available and use the JSON CLI on other systems.
-
-Do not add Streamable HTTP in the first release. Stdio has a smaller security surface and matches the local Codex use case.
-
 ## Current ROI-H assessment
 
 The assessment below comes from the current [CLI](../../src/roi_h/cli.py) and harness modules at commit `e8a3994`.
@@ -372,7 +352,6 @@ The assessment below comes from the current [CLI](../../src/roi_h/cli.py) and ha
 - There is no complete skill lifecycle interface.
 - Automation listing has no show, verify, or compare operation.
 - There is no machine-readable version, capabilities, or completion command.
-- There is no MCP adapter.
 
 ## Target command surface
 
@@ -516,16 +495,7 @@ Do not add raw SQL operations. ActiveGraph and SQLite are implementation details
 
 **Exit condition:** An agent can disconnect, reconnect, find the run, continue after the last event, and retrieve the final result.
 
-### Phase 6: Optional MCP adapter
-
-1. Generate MCP tools from the registry.
-2. Use stdio only in the first release.
-3. Keep logs on standard error.
-4. Add MCP contract tests against the same fixtures as the CLI.
-
-**Exit condition:** The CLI and MCP form return equivalent data and enforce the same policy for each registered operation.
-
-### Phase 7: Agent-only acceptance test
+### Phase 6: Agent-only acceptance test
 
 Create an end-to-end test that starts with an installed wheel and an empty home. The test agent must only use published CLI JSON. It must not import ROI-H Python modules or read SQLite.
 
@@ -552,4 +522,5 @@ The test must:
 
 Do not replace `argparse` only to make the interface look newer. The framework is not the main problem. PyPA shows several valid Python CLI frameworks and package entry-point patterns. The stable registry and contract matter more than the parser library. [PyPA command-line packaging guide](https://packaging.python.org/en/latest/guides/creating-command-line-tools/)
 
-Build the JSON CLI first. Add MCP after the same interface passes the agent-only acceptance test. This gives Codex an immediate local interface and keeps MCP as a small adapter.
+Build and qualify the JSON CLI as the only external-AI interface. This gives Codex and
+other shell-capable agents one stable local process contract.
