@@ -16,6 +16,7 @@ from uuid import uuid4
 
 from activegraph.store.sqlite import SQLiteEventStore
 
+from roi_h import __version__
 from roi_h.agent.cli import main as agent_main
 from roi_h.agent.contract import CommandContext, CommandRequest
 from roi_h.agent.dispatcher import Dispatcher
@@ -49,6 +50,7 @@ from roi_h.harness.workspace import (
     set_active_env,
     set_active_project,
 )
+from roi_h.installation import default_install_root, inspect_installation_health
 
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
@@ -66,6 +68,26 @@ def _configure_ui_parser(parser: argparse.ArgumentParser) -> None:
         help="Start the observer without opening a browser",
     )
     parser.set_defaults(handler=_cmd_ui)
+
+
+def _cmd_version(args: argparse.Namespace) -> dict[str, str] | None:
+    identity = {"name": "roi-h", "version": __version__}
+    if args.output == "json":
+        return identity
+    sys.stdout.write(f"{identity['name']} {identity['version']}\n")
+    return None
+
+
+def _cmd_doctor(args: argparse.Namespace) -> dict[str, Any]:
+    report = inspect_installation_health(
+        install_root=Path(args.install_root).expanduser().resolve(),
+        data_home=resolve_home(args.home),
+        application_version=__version__,
+        skills_root=default_skills_root(),
+    )
+    payload = report.to_dict()
+    payload["ok"] = report.healthy
+    return payload
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -119,7 +141,16 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="roi-h",
         description="ROI-H operator CLI for skills-based RPA (dev/prod aware).",
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
+    version_command = sub.add_parser("version", help="Show the installed ROI-H version")
+    version_command.add_argument("--output", choices=["text", "json"], default="text")
+    version_command.set_defaults(handler=_cmd_version)
+    doctor = sub.add_parser("doctor", help="Inspect installation health without repair")
+    doctor.add_argument("--install-root", default=str(default_install_root()))
+    doctor.add_argument("--home", default=None)
+    doctor.add_argument("--output", choices=["json"], default="json")
+    doctor.set_defaults(handler=_cmd_doctor)
     rpa = sub.add_parser("rpa", help="RPA harness commands")
     rpa_sub = rpa.add_subparsers(dest="rpa_command", required=True)
     observer_shortcut = sub.add_parser(

@@ -134,9 +134,7 @@ def store_status(request: CommandRequest) -> dict[str, Any]:
 
 def store_check(request: CommandRequest) -> dict[str, Any]:
     """Run a read-only store check."""
-    level: Literal["quick", "full"] = (
-        "full" if request.arguments.get("full") is True else "quick"
-    )
+    level: Literal["quick", "full"] = "full" if request.arguments.get("full") is True else "quick"
     return cast(
         "dict[str, Any]",
         _safe(StoreLifecycle().check(_workspace(request), level).to_dict()),
@@ -153,8 +151,7 @@ def tool_list(request: CommandRequest) -> dict[str, Any]:
         database=workspace.db,
     )
     items = [
-        cast("dict[str, Any]", _safe(item.model_dump(mode="json")))
-        for item in catalog.list_tools()
+        cast("dict[str, Any]", _safe(item.model_dump(mode="json"))) for item in catalog.list_tools()
     ]
     return _page(items, request, snapshot=f"tools:{len(items)}")
 
@@ -301,9 +298,7 @@ def _objects_page(request: CommandRequest, object_type: str) -> dict[str, Any]:
     run_id = _run_id(request)
     objects = _adapter(request).project_run(run_id)["objects"]
     items = [
-        cast("dict[str, Any]", _safe(item))
-        for item in objects
-        if item.get("type") == object_type
+        cast("dict[str, Any]", _safe(item)) for item in objects if item.get("type") == object_type
     ]
     return {"run_id": run_id, **_page(items, request, snapshot=_adapter(request).snapshot())}
 
@@ -408,7 +403,8 @@ def _safe(value: Any) -> Any:  # noqa: ANN401 - Recursive JSON values are dynami
         return {
             key: _safe(item)
             for key, item in value.items()
-            if key.lower() not in {
+            if key.lower()
+            not in {
                 "db",
                 "database",
                 "path",

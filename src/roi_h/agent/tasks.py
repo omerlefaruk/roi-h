@@ -45,9 +45,7 @@ class TaskStore:
             self._event(task, 1, "task.queued", {}),
             self._event(task, 2, "task.working", {}),
         ]
-        task = task.model_copy(
-            update={"state": TaskState.WORKING, "updated_at": datetime.now(UTC)}
-        )
+        task = task.model_copy(update={"state": TaskState.WORKING, "updated_at": datetime.now(UTC)})
         self._write(task, events)
         return task
 
@@ -193,9 +191,7 @@ def task_wait(request: CommandRequest) -> dict[str, Any]:
 def task_cancel(request: CommandRequest) -> dict[str, Any]:
     """Cancel one nonterminal task."""
     return (
-        TaskStore(request.arguments.get("home"))
-        .cancel(_task_id(request))
-        .model_dump(mode="json")
+        TaskStore(request.arguments.get("home")).cancel(_task_id(request)).model_dump(mode="json")
     )
 
 
