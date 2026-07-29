@@ -15,7 +15,7 @@ from roi_h.agent.contract import (
     Idempotency,
     OperationManifest,
 )
-from roi_h.harness.workspace import list_projects
+from roi_h.harness.workspace import Workspace, list_projects
 
 OperationHandler = Callable[[CommandRequest], dict[str, Any]]
 
@@ -75,6 +75,26 @@ class OperationCatalog:
 def build_catalog() -> OperationCatalog:
     """Build the contract version 1.0 catalog."""
     catalog = OperationCatalog()
+    catalog.register(
+        _read_operation(
+            "system.describe",
+            "Describe all operations or one selected operation.",
+            _system_describe,
+            properties={"operation": {"type": ["string", "null"]}},
+        )
+    )
+    catalog.register(
+        _read_operation(
+            "system.context",
+            "Show the bounded selected context.",
+            _system_context,
+            properties={
+                "home": {"type": ["string", "null"]},
+                "project": {"type": ["string", "null"]},
+                "environment": {"enum": ["dev", "prod", None]},
+            },
+        )
+    )
     catalog.register(
         _read_operation(
             "system.version",
@@ -138,6 +158,41 @@ def _object_schema(
 
 def _system_version(_request: CommandRequest) -> dict[str, Any]:
     return {"version": __version__, "contract_version": "1.0"}
+
+
+def _system_describe(_request: CommandRequest) -> dict[str, Any]:
+    return {"operation": "system.describe"}
+
+
+def _system_context(request: CommandRequest) -> dict[str, Any]:
+    arguments = request.arguments
+    items = list_projects(arguments.get("home"))
+    if not items:
+        return {
+            "project": None,
+            "environment": None,
+            "health_warnings": ["No project is available."],
+            "recent_runs": [],
+            "pending_approvals": [],
+            "safe_next_actions": [{"operation": "project.create"}],
+        }
+    workspace = Workspace.open(
+        arguments.get("home"),
+        project=arguments.get("project"),
+        env=arguments.get("environment"),
+    )
+    return {
+        "project": workspace.project,
+        "project_id": workspace.project_id,
+        "environment": workspace.env,
+        "health_warnings": [],
+        "recent_runs": [],
+        "pending_approvals": [],
+        "safe_next_actions": [
+            {"operation": "tool.list"},
+            {"operation": "run.list"},
+        ],
+    }
 
 
 def _project_list(request: CommandRequest) -> dict[str, Any]:

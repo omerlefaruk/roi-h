@@ -13,6 +13,7 @@ from typing import Any
 
 from activegraph.store.sqlite import SQLiteEventStore
 
+from roi_h.agent.cli import main as agent_main
 from roi_h.harness import RunSession
 from roi_h.harness.automation import list_automations
 from roi_h.harness.custom import define_project_tool
@@ -64,8 +65,10 @@ def _configure_ui_parser(parser: argparse.ArgumentParser) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Entry point for ``roi-h`` / ``python -m roi_h``."""
-    parser = _build_parser()
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    if raw_argv[:1] == ["agent"]:
+        return agent_main(raw_argv[1:])
+    parser = _build_parser()
     if raw_argv[:4] == ["rpa", "run", "input", "add"]:
         raw_argv = ["rpa", "input", "add", *raw_argv[4:]]
     elif raw_argv[:3] == ["rpa", "run", "files"]:
