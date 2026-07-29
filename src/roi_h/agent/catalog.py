@@ -15,6 +15,7 @@ from roi_h.agent.contract import (
     Idempotency,
     OperationManifest,
 )
+from roi_h.agent.read_operations import list_runs, run_events, run_trace, show_run
 from roi_h.harness.workspace import Workspace, list_projects
 
 OperationHandler = Callable[[CommandRequest], dict[str, Any]]
@@ -83,6 +84,28 @@ def build_catalog() -> OperationCatalog:
             properties={"operation": {"type": ["string", "null"]}},
         )
     )
+    for operation_id, description, handler in (
+        ("run.list", "List durable runs.", list_runs),
+        ("run.show", "Show one durable run.", show_run),
+        ("run.status", "Show one durable run status.", show_run),
+        ("run.events", "Read canonical ordered run events.", run_events),
+        ("run.trace", "Read a bounded product trace.", run_trace),
+    ):
+        catalog.register(
+            _read_operation(
+                operation_id,
+                description,
+                handler,
+                pagination=operation_id in {"run.list", "run.events"},
+                properties={
+                    "home": {"type": ["string", "null"]},
+                    "run_id": {"type": ["string", "null"]},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+                    "cursor": {"type": ["string", "null"]},
+                    "after": {"type": ["string", "null"]},
+                },
+            )
+        )
     catalog.register(
         _read_operation(
             "system.context",

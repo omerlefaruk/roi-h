@@ -20,7 +20,7 @@ class ActiveGraphProjectionAdapter:
             raise FileNotFoundError(msg)
         self.database = database.resolve()
 
-    def list_run_headers(self, *, limit: int) -> list[dict[str, Any]]:
+    def list_run_headers(self, *, limit: int, offset: int = 0) -> list[dict[str, Any]]:
         """Return bounded run-registry rows newest first."""
         with self._connect() as connection:
             rows = connection.execute(
@@ -28,11 +28,47 @@ class ActiveGraphProjectionAdapter:
                 SELECT run_id, created_at, goal, label
                 FROM runs
                 ORDER BY created_at DESC
-                LIMIT ?
+                LIMIT ? OFFSET ?
                 """,
-                (limit,),
+                (limit, offset),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def snapshot(self) -> str:
+        """Return an opaque projection watermark."""
+        with self._connect() as connection:
+            row = connection.execute("SELECT COALESCE(MAX(seq), 0) AS seq FROM events").fetchone()
+        return f"event:{int(row['seq'])}"
+
+    def list_events(
+        self,
+        run_id: str,
+        *,
+        limit: int,
+        after_sequence: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Return canonical events after one sequence."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT seq, type, payload, timestamp
+                FROM events
+                WHERE run_id = ? AND seq > ?
+                ORDER BY seq
+                LIMIT ?
+                """,
+                (run_id, after_sequence, limit),
+            ).fetchall()
+        return [
+            {
+                "event_id": f"event:{int(row['seq'])}",
+                "sequence": int(row["seq"]),
+                "type": str(row["type"]),
+                "timestamp": str(row["timestamp"]),
+                "data": _parse_payload(str(row["payload"] or "{}")),
+            }
+            for row in rows
+        ]
 
     def run_header(self, run_id: str) -> dict[str, Any] | None:
         """Return one run-registry row."""

@@ -76,3 +76,80 @@ def test_agent_invalid_input_is_structured_and_exits_two(tmp_path: Path) -> None
     assert payload["changed"] is False
     assert payload["error"]["code"] == "request.invalid"
     assert payload["error"]["retryable"] is False
+
+
+def test_agent_can_find_and_explain_a_run_without_sql(tmp_path: Path) -> None:
+    home = str(tmp_path / "home")
+    create = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            "-m",
+            "roi_h",
+            "rpa",
+            "project",
+            "create",
+            "demo",
+            "--home",
+            home,
+        ],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert create.returncode == 0, create.stderr
+    start = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            "-m",
+            "roi_h",
+            "rpa",
+            "start",
+            "--home",
+            home,
+            "--run-id",
+            "agent-read-run",
+            "--goal",
+            "Read this run",
+        ],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert start.returncode == 0, start.stderr
+
+    base_request = {
+        "schema_version": "1.0",
+        "context": {"project": "demo", "environment": "dev"},
+        "arguments": {"home": home, "limit": 10},
+    }
+    listed = _agent(
+        "call",
+        "run.list",
+        "--input",
+        "-",
+        cwd=tmp_path,
+        stdin=json.dumps(base_request),
+    )
+    assert listed.returncode == 0, listed.stderr
+    page = json.loads(listed.stdout)["result"]
+    assert page["items"][0]["run_id"] == "agent-read-run"
+    assert page["has_more"] is False
+    assert page["snapshot"]
+
+    for operation in ("run.show", "run.events", "run.trace"):
+        request = dict(base_request)
+        request["arguments"] = {"home": home, "run_id": "agent-read-run", "limit": 50}
+        called = _agent(
+            "call",
+            operation,
+            "--input",
+            "-",
+            cwd=tmp_path,
+            stdin=json.dumps(request),
+        )
+        assert called.returncode == 0, called.stdout
+        result = json.loads(called.stdout)["result"]
+        assert result["run_id"] == "agent-read-run"
+        assert str(tmp_path) not in called.stdout
