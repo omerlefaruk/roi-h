@@ -285,6 +285,8 @@ try {
 setlocal
 for %%I in ("%~dp0..") do set "ROI_H_INSTALL_ROOT=%%~fI"
 if not defined ROI_H_HOME set "ROI_H_HOME=$launcherDataHome"
+set "PLAYWRIGHT_BROWSERS_PATH=%ROI_H_INSTALL_ROOT%\browsers"
+set "PLAYWRIGHT_SKIP_BROWSER_GC=1"
 set /p "ROI_H_ACTIVE_VERSION="<"%ROI_H_INSTALL_ROOT%\current"
 if not defined ROI_H_ACTIVE_VERSION (
   1>&2 echo ROI-H failed: the active version pointer is empty.

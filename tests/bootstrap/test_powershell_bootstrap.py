@@ -51,6 +51,8 @@ def test_powershell_bootstrap_matches_the_pinned_install_contract() -> None:
     assert '"versions\\" + $installState.active_version' in script
     assert 'set /p "ROI_H_ACTIVE_VERSION="<"%ROI_H_INSTALL_ROOT%\\current"' in script
     assert '"roi-h.cmd"' in script
+    assert 'set "PLAYWRIGHT_BROWSERS_PATH=%ROI_H_INSTALL_ROOT%\\browsers"' in script
+    assert 'set "PLAYWRIGHT_SKIP_BROWSER_GC=1"' in script
     assert '"installer\\update.ps1"' in script
     assert '"https://raw.githubusercontent.com/omerlefaruk/roi-h/main/install.ps1"' in script
     assert '[Environment]::SetEnvironmentVariable("Path"' in script

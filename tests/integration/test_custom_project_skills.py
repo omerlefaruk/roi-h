@@ -26,9 +26,12 @@ def _roi_h(
 
 
 _FILTER_SCRIPT = """\
+import atexit
 import os
 
 from pydantic import BaseModel, Field
+
+atexit.register(lambda: os.write(1, b'late output'))
 
 TOOL_ID = "filter_high"
 DESCRIPTION = "Filter amounts above a threshold"

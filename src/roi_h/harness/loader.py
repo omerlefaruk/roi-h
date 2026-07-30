@@ -21,7 +21,12 @@ from pydantic import BaseModel, ConfigDict
 
 from roi_h.harness.domain import IdempotencyMode, SkillScope, ToolEffect, ToolInfo
 from roi_h.harness.runtime_environment import isolated_process_environment
-from roi_h.harness.skill_contract import SkillInspection, inspect_module, skill_tree_digest
+from roi_h.harness.skill_contract import (
+    SkillInspection,
+    inspect_module,
+    skill_tree_digest,
+    strict_skill_model,
+)
 from roi_h.harness.worker import WORKER_PROTOCOL_LIMIT
 from roi_h.harness.workspace import resolve_home
 
@@ -308,8 +313,8 @@ def _load_script_tool(
             source=source,
             trusted=True,
         )
-        input_model = module.Input
-        output_model = module.Output
+        input_model = strict_skill_model(module.Input)
+        output_model = strict_skill_model(module.Output)
         run = module.run
     else:
         inspection = _inspect_script(
@@ -366,7 +371,6 @@ def _inspect_script(
     try:
         with tempfile.TemporaryDirectory(prefix="roi-h-inspection-") as temporary:
             temporary_path = Path(temporary).resolve()
-            response_path = temporary_path / "response.json"
             request = json.dumps(
                 {
                     "operation": "inspect",
@@ -376,7 +380,6 @@ def _inspect_script(
                     "expected_tree_sha256": expected_tree_sha256,
                     "reject_bytecode": reject_bytecode,
                     "temporary": str(temporary_path),
-                    "response_path": str(response_path),
                     "skill": skill,
                 }
             )
@@ -384,18 +387,13 @@ def _inspect_script(
                 _inspection_command(temporary_path),
                 input=request,
                 text=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                capture_output=True,
                 check=False,
                 cwd=Path(sys.executable).resolve().parent,
                 env=isolated_process_environment(),
                 timeout=_INSPECTION_TIMEOUT_SECONDS,
             )
-            if not response_path.is_file():
-                msg = f"skill inspection returned no response (exit={completed.returncode})"
-                raise RuntimeError(msg)
-            with response_path.open(encoding="utf-8") as response_file:
-                response_text = response_file.read(WORKER_PROTOCOL_LIMIT + 1)
+            response_text = completed.stdout[: WORKER_PROTOCOL_LIMIT + 1]
     except subprocess.TimeoutExpired as exc:
         msg = f"skill inspection exceeded {_INSPECTION_TIMEOUT_SECONDS:g}s: {script_path}"
         raise TimeoutError(msg) from exc
@@ -407,7 +405,10 @@ def _inspect_script(
     except json.JSONDecodeError as exc:
         msg = f"skill inspection returned invalid JSON: {script_path}"
         raise RuntimeError(msg) from exc
-    if not isinstance(response, dict) or response.get("ok") is not True:
+    if not isinstance(response, dict) or bool(response.get("ok")) != (completed.returncode == 0):
+        msg = f"skill inspection response does not match exit {completed.returncode}: {script_path}"
+        raise RuntimeError(msg)
+    if response.get("ok") is not True:
         error = response.get("error") if isinstance(response, dict) else "invalid response"
         msg = f"skill inspection failed: {script_path}: {error}"
         raise RuntimeError(msg)
@@ -442,7 +443,12 @@ def _import_script(*, skill: str, script_path: Path) -> ModuleType:
         raise ImportError(msg)
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
-    spec.loader.exec_module(module)
+    prior = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = prior
     return module
 
 

@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 
+from roi_h.harness import loader
 from roi_h.harness.loader import default_skills_root, load_skills
+from roi_h.harness.skill_contract import skill_tree_digest
 
 _SHARED_TOOL = """\
 from pydantic import BaseModel
@@ -51,6 +53,24 @@ def test_load_skills_discovers_browser_stub_tools() -> None:
     assert catalog.resolve("browser", "session_status").effect == "read"
     assert catalog.resolve("browser", "navigate").network_hosts == ("*",)
     assert catalog.resolve("http", "get").network_hosts == ("*",)
+
+
+def test_trusted_skill_import_keeps_its_tree_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "core"
+    skill = root / "example"
+    (skill / "scripts").mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# example\n", encoding="utf-8")
+    (skill / "scripts" / "hello.py").write_text(_SHARED_TOOL, encoding="utf-8")
+    before = skill_tree_digest(skill, reject_bytecode=False)
+    monkeypatch.setattr(loader, "default_skills_root", lambda: root)
+
+    catalog = loader.load_skills(root)
+
+    assert catalog.resolve("example", "hello")
+    assert skill_tree_digest(skill, reject_bytecode=False) == before
+    assert not list(skill.rglob("*.pyc"))
 
 
 def test_user_shared_skills_load_between_core_and_project(tmp_path: Path) -> None:

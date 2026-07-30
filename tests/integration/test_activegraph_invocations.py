@@ -42,6 +42,23 @@ def test_invocation_is_scheduled_executed_and_materialized_by_activegraph(
     assert invocation.data["duration_seconds"] >= 0
 
 
+def test_built_in_skill_rejects_unknown_input_fields(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    harness = RunSession.create(
+        workspace,
+        run_id="strict-built-in",
+        skills_root=default_skills_root(),
+        auto_approve=True,
+    )
+    harness.start_run("reject unknown fields")
+
+    result = harness.invoke("browser", "navigate", {"url": "https://example.com", "unknown": True})
+
+    assert result.status == "error"
+    assert result.failure is not None
+    assert result.failure.kind == "validation"
+
+
 def test_write_tools_cannot_be_reinvoked_as_deterministic_replay(
     tmp_path: Path,
 ) -> None:

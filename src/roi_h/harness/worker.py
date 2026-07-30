@@ -44,17 +44,23 @@ class _BoundedBuffer(io.TextIOBase):
 
 def main() -> int:
     """Inspect or execute one skill script request from standard input."""
+    protocol = os.fdopen(os.dup(sys.stdout.fileno()), "w", encoding="utf-8")
     state = {"stage": "request"}
     captured_stdout = _BoundedBuffer(_MAX_CAPTURE_CHARS)
     captured_stderr = _BoundedBuffer(_MAX_CAPTURE_CHARS)
     temporary: tempfile.TemporaryDirectory[str] | None = None
     cleanup: Callable[[], contextlib.AbstractContextManager[None]] | None = None
-    response_path: Path | None = None
     try:
         request = _request()
-        response_path = _response_path(request.get("response_path"))
         operation = str(request.get("operation") or "invoke")
         temporary_path, temporary = _temporary_path(request.get("temporary"))
+        null_target = (
+            temporary_path / "worker-output" if operation == "inspect" else Path(os.devnull)
+        )
+        null = os.open(null_target, os.O_WRONLY | os.O_CREAT, 0o600)
+        os.dup2(null, sys.stdout.fileno())
+        os.dup2(null, sys.stderr.fileno())
+        os.close(null)
         state["stage"] = "integrity"
         script, source = _snapshot_skill(request, temporary_path)
         if operation == "inspect":
@@ -94,11 +100,14 @@ def main() -> int:
     encoded, within_limit = _encode_response(response)
     try:
         if cleanup is None:
-            _write_response(response_path, encoded)
+            protocol.write(encoded)
+            protocol.flush()
         else:
             with cleanup():
-                _write_response(response_path, encoded)
+                protocol.write(encoded)
+                protocol.flush()
     finally:
+        protocol.close()
         if temporary is not None:
             if cleanup is None:
                 temporary.cleanup()
@@ -106,22 +115,6 @@ def main() -> int:
                 with cleanup():
                     temporary.cleanup()
     return 0 if response["ok"] and within_limit else 1
-
-
-def _write_response(response_path: Path | None, encoded: str) -> None:
-    if response_path is None:
-        sys.stdout.write(encoded)
-    else:
-        response_path.write_text(encoded, encoding="utf-8")
-
-
-def _response_path(value: object) -> Path | None:
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        msg = "response_path must be a path string"
-        raise TypeError(msg)
-    return Path(value).expanduser().resolve()
 
 
 def _encode_response(response: dict[str, Any]) -> tuple[str, bool]:
@@ -155,7 +148,7 @@ def _temporary_path(
     if not isinstance(value, str):
         msg = "temporary must be a path string"
         raise TypeError(msg)
-    path = Path(value).resolve()
+    path = Path(value).expanduser().absolute()
     if not path.is_dir():
         msg = "declared worker temporary directory does not exist"
         raise FileNotFoundError(msg)

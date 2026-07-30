@@ -154,4 +154,10 @@ orchestration. Each executable tool module defines strict Pydantic `Input` and `
 models, `run(args: Input) -> Output`, and its effect, idempotency, approval, production,
 timeout, secret, network, and filesystem metadata. Missing custom-tool security metadata
 fails closed. ROI-H inspects custom modules in a bounded worker and never imports them in
-the parent process. Production uses only frozen, verified skill code.
+the parent process.
+
+The current development worker is process isolation, not an operating-system sandbox.
+Custom skill Python is trusted local code; declared network and filesystem metadata guides
+the broker but cannot confine arbitrary Python. Production recipe replacement stays
+blocked until a verified, effect-restricted runner enforces those capabilities at the
+process boundary.

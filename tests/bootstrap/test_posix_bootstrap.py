@@ -230,8 +230,12 @@ printf '%s  %s\n' "$digest" "$last"
     assert "--output json" in log
     assert f"installer-home:{data_home}" in log
     launcher = bin_root / "roi-h"
-    assert launcher.is_symlink()
-    assert launcher.resolve() == install_root / "current" / "bin" / "roi-h"
+    assert launcher.is_file()
+    assert not launcher.is_symlink()
+    launcher_text = launcher.read_text(encoding="utf-8")
+    assert "PLAYWRIGHT_BROWSERS_PATH" in launcher_text
+    assert "PLAYWRIGHT_SKIP_BROWSER_GC=1" in launcher_text
+    assert subprocess.run([launcher], check=False).returncode == 0  # noqa: S603
     updater = install_root / "installer" / "update.sh"
     assert updater.stat().st_mode & 0o111
     assert (

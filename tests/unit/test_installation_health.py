@@ -252,12 +252,8 @@ def test_managed_install_fails_when_browser_cannot_launch(tmp_path: Path, monkey
     }
 
 
-def test_windows_browser_root_is_outside_the_package(tmp_path: Path, monkeypatch) -> None:
+def test_managed_browser_root_follows_a_custom_install_root(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
-    monkeypatch.setattr(installation, "_WINDOWS", True)
+    install_root = tmp_path / "custom-install"
 
-    assert (
-        managed_browser_root(tmp_path / "read-only-package")
-        == (tmp_path / "local" / "ROI-H" / "Browsers").resolve()
-    )
+    assert managed_browser_root(install_root) == (install_root / "browsers").resolve()

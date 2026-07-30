@@ -113,9 +113,12 @@ def skill_tree_digest(root: Path, *, reject_bytecode: bool) -> str:
         if not path.is_file():
             continue
         relative = path.relative_to(root).as_posix()
-        if reject_bytecode and (path.suffix == ".pyc" or "__pycache__" in path.parts):
+        bytecode = path.suffix == ".pyc" or "__pycache__" in path.parts
+        if reject_bytecode and bytecode:
             msg = f"custom skill tree contains Python bytecode: {relative}"
             raise ValueError(msg)
+        if bytecode:
+            continue
         if reject_bytecode and any(
             path.name.endswith(suffix) for suffix in importlib.machinery.EXTENSION_SUFFIXES
         ):

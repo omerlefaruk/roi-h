@@ -89,38 +89,11 @@ Moving a project capability into `src/roi_h` or the packaged `skills/` tree requ
 explicit product decision that it is generic, supported, documented, and safe for every
 ROI-H user.
 
-### GitHub publication and legacy history
+### GitHub publication
 
-Ignoring or deleting a file does not remove it from older Git commits. The current local
-repository predates this publication boundary and its legacy history contains customer
-documents and generated automation material. No existing ref or tag may be pushed to a
-public or shared GitHub repository until that history is sanitized.
-
-The repository uses `.githooks/pre-push` to run:
-
-```shell
-python3 scripts/check_publication_boundary.py --history
-```
-
-The hook intentionally blocks pushes while a forbidden path exists anywhere in local
-history. The current-tree check remains part of local qualification:
-
-```shell
-python scripts/check_publication_boundary.py
-```
-
-Before the first GitHub publication, work from a clean, fully qualified tree and choose
-one of these proof-preserving procedures:
-
-1. Create a new public repository with one fresh root commit containing only the
-   qualified generic-core tree. Keep the old private Git directory under
-   `~/.roi-h/private/` for local recovery.
-2. Back up every private ref, use a history-filtering tool to remove every path rejected
-   by the history check across every ref and tag, then run the history check again.
-
-The fresh-root procedure is preferred before the first public release because the local
-repository has no remote and no public history needs to be preserved. Never disable the
-pre-push hook to work around a failing history check.
+Ignoring or deleting a file does not remove it from older commits. The pre-push hook runs
+`scripts/check_publication_boundary.py --history`, and release qualification checks the
+current tree. Do not bypass either check.
 
 ### User-owned storage
 
@@ -487,29 +460,9 @@ Windows, and supported Linux targets:
 
 ## Implementation sequence for agents
 
-The full deliverables, exit conditions, trust model, and tests are in
-[`release-implementation-plan.md`](release-implementation-plan.md). Use the paste-ready
-[`release implementation handoff`](handoffs/release-implementation-handoff.md) to start
-work in the isolated release worktree.
-
-Work in dependency order:
-
-1. **CLI contract:** add version, doctor, setup internals, and stable exit behavior.
-2. **Release metadata:** define the signed release-index schema, locked dependency
-   artifact, and channel rules.
-3. **Filesystem model:** implement platform paths, version staging, active pointer, data
-   separation, and rollback.
-4. **Updater helper:** implement install, update, exact-version restore, verification, and
-   failure recovery outside the active environment.
-5. **Bootstrap scripts:** add POSIX and PowerShell entrypoints that delegate to the same
-   updater behavior.
-6. **Release execution:** qualify and publish locally first; if unattended publishing is
-   later required, run the same gate through a non-GitHub Trusted Publisher. Build once,
-   publish through trusted credentials, sign metadata, and advance channels only after
-   installer qualification.
-7. **Platform qualification:** prove the complete acceptance matrix on clean macOS,
-   Windows, and Linux environments.
-8. **OCI image:** publish the matching worker image and verify application-version parity.
+Use this document and the live release checks. Build the native macOS and Windows paths,
+prove install, browser launch, update, rollback, and data preservation, and only then
+remove the temporary shell, PowerShell, wheelhouse, and Python-index customer paths.
 
 Do not collapse the updater into the application environment, store user data beneath a
 version directory, make Playwright setup a manual user step, or report installation

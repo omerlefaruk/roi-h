@@ -63,11 +63,6 @@ external-AI interface is documented in the
 from `roi-h agent describe` is the machine-contract authority. The retained
 [primary-source research](docs/research/external-ai-cli-primary-research.md) records the
 security basis for this interface.
-The release, installer, update, and rollback implementation plan is in
-[`docs/release-implementation-plan.md`](docs/release-implementation-plan.md), with its
-handoff in
-[`docs/handoffs/release-implementation-handoff.md`](docs/handoffs/release-implementation-handoff.md).
-
 Published versions are immutable, digest-verified snapshots. `ship` is the only CLI
 publishing journey; `run` executes its straight-line recipe. Advanced ActiveGraph
 operations remain available through `RunSession.runtime` instead of mirrored ROI-H

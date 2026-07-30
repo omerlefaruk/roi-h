@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 SCHEMA_VERSION: Literal[1] = 1
 SUPPORTED_PYTHON = (3, 12)
 BUILT_IN_SKILLS = ("browser", "excel", "feedback", "files", "http", "pdf", "shell")
-_WINDOWS = os.name == "nt"
 _PROTOCOL_RESULT = 2
 
 type HealthStatus = Literal["pass", "fail", "pending"]
@@ -55,10 +54,6 @@ def managed_browser_root(install_root: Path | None = None) -> Path:
     configured = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
     if configured:
         return Path(configured).expanduser().resolve()
-    if _WINDOWS:
-        local_app_data = os.environ.get("LOCALAPPDATA")
-        if local_app_data:
-            return (Path(local_app_data).expanduser() / "ROI-H" / "Browsers").resolve()
     return ((install_root or default_install_root()) / "browsers").resolve()
 
 
