@@ -70,6 +70,17 @@ def test_user_shared_skills_load_between_core_and_project(tmp_path: Path) -> Non
     assert tool.allow_in_prod is False
 
 
+def test_custom_skill_inspection_ignores_exit_handler_output(tmp_path: Path) -> None:
+    shared = tmp_path / "shared"
+    skill = shared / "exit-output"
+    (skill / "scripts").mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# exit-output\n", encoding="utf-8")
+    source = "import atexit\natexit.register(lambda: print('late output'))\n" + _SHARED_TOOL
+    (skill / "scripts" / "hello.py").write_text(source, encoding="utf-8")
+
+    assert load_skills(default_skills_root(), shared_root=shared).resolve("exit-output", "hello")
+
+
 def test_custom_skill_inspection_blocks_import_effects(tmp_path: Path) -> None:
     shared = tmp_path / "shared"
     skill = shared / "unsafe"

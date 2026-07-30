@@ -26,17 +26,33 @@ from roi_h.harness.skill_contract import (
 
 _MAX_CAPTURE_CHARS = 20_000
 _MAX_ERROR_CHARS = 4_000
+WORKER_PROTOCOL_LIMIT = 1_000_000
+
+
+class _BoundedBuffer(io.TextIOBase):
+    def __init__(self, limit: int) -> None:
+        self._limit = limit
+        self._value = ""
+
+    def write(self, value: str) -> int:
+        self._value = (self._value + value[-self._limit :])[-self._limit :]
+        return len(value)
+
+    def getvalue(self) -> str:
+        return self._value
 
 
 def main() -> int:
     """Inspect or execute one skill script request from standard input."""
     state = {"stage": "request"}
-    captured_stdout = io.StringIO()
-    captured_stderr = io.StringIO()
+    captured_stdout = _BoundedBuffer(_MAX_CAPTURE_CHARS)
+    captured_stderr = _BoundedBuffer(_MAX_CAPTURE_CHARS)
     temporary: tempfile.TemporaryDirectory[str] | None = None
     cleanup: Callable[[], contextlib.AbstractContextManager[None]] | None = None
+    response_path: Path | None = None
     try:
         request = _request()
+        response_path = _response_path(request.get("response_path"))
         operation = str(request.get("operation") or "invoke")
         temporary_path, temporary = _temporary_path(request.get("temporary"))
         state["stage"] = "integrity"
@@ -73,6 +89,15 @@ def main() -> int:
             "error": _bounded(f"{type(exc).__name__}: {exc}", _MAX_ERROR_CHARS),
             "exception_type": type(exc).__name__,
         }
+    response["stdout"] = captured_stdout.getvalue()
+    response["stderr"] = captured_stderr.getvalue()
+    encoded, within_limit = _encode_response(response)
+    try:
+        if cleanup is None:
+            _write_response(response_path, encoded)
+        else:
+            with cleanup():
+                _write_response(response_path, encoded)
     finally:
         if temporary is not None:
             if cleanup is None:
@@ -80,10 +105,45 @@ def main() -> int:
             else:
                 with cleanup():
                     temporary.cleanup()
-    response["stdout"] = _bounded(captured_stdout.getvalue(), _MAX_CAPTURE_CHARS)
-    response["stderr"] = _bounded(captured_stderr.getvalue(), _MAX_CAPTURE_CHARS)
-    sys.stdout.write(json.dumps(response, sort_keys=True, default=str))
-    return 0 if response["ok"] else 1
+    return 0 if response["ok"] and within_limit else 1
+
+
+def _write_response(response_path: Path | None, encoded: str) -> None:
+    if response_path is None:
+        sys.stdout.write(encoded)
+    else:
+        response_path.write_text(encoded, encoding="utf-8")
+
+
+def _response_path(value: object) -> Path | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        msg = "response_path must be a path string"
+        raise TypeError(msg)
+    return Path(value).expanduser().resolve()
+
+
+def _encode_response(response: dict[str, Any]) -> tuple[str, bool]:
+    chunks: list[str] = []
+    size = 0
+    for chunk in json.JSONEncoder(sort_keys=True, default=str).iterencode(response):
+        size += len(chunk)
+        if size > WORKER_PROTOCOL_LIMIT:
+            return (
+                json.dumps(
+                    {
+                        "ok": False,
+                        "stage": "response",
+                        "error": f"worker response exceeds {WORKER_PROTOCOL_LIMIT} characters",
+                        "exception_type": "WorkerResponseTooLarge",
+                    },
+                    sort_keys=True,
+                ),
+                False,
+            )
+        chunks.append(chunk)
+    return "".join(chunks), True
 
 
 def _temporary_path(

@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict
 from roi_h.harness.domain import IdempotencyMode, SkillScope, ToolEffect, ToolInfo
 from roi_h.harness.runtime_environment import isolated_process_environment
 from roi_h.harness.skill_contract import SkillInspection, inspect_module, skill_tree_digest
+from roi_h.harness.worker import WORKER_PROTOCOL_LIMIT
 from roi_h.harness.workspace import resolve_home
 
 if TYPE_CHECKING:
@@ -365,6 +366,7 @@ def _inspect_script(
     try:
         with tempfile.TemporaryDirectory(prefix="roi-h-inspection-") as temporary:
             temporary_path = Path(temporary).resolve()
+            response_path = temporary_path / "response.json"
             request = json.dumps(
                 {
                     "operation": "inspect",
@@ -374,6 +376,7 @@ def _inspect_script(
                     "expected_tree_sha256": expected_tree_sha256,
                     "reject_bytecode": reject_bytecode,
                     "temporary": str(temporary_path),
+                    "response_path": str(response_path),
                     "skill": skill,
                 }
             )
@@ -381,20 +384,28 @@ def _inspect_script(
                 _inspection_command(temporary_path),
                 input=request,
                 text=True,
-                capture_output=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 check=False,
                 cwd=Path(sys.executable).resolve().parent,
                 env=isolated_process_environment(),
                 timeout=_INSPECTION_TIMEOUT_SECONDS,
             )
+            if not response_path.is_file():
+                msg = f"skill inspection returned no response (exit={completed.returncode})"
+                raise RuntimeError(msg)
+            with response_path.open(encoding="utf-8") as response_file:
+                response_text = response_file.read(WORKER_PROTOCOL_LIMIT + 1)
     except subprocess.TimeoutExpired as exc:
         msg = f"skill inspection exceeded {_INSPECTION_TIMEOUT_SECONDS:g}s: {script_path}"
         raise TimeoutError(msg) from exc
+    if len(response_text) > WORKER_PROTOCOL_LIMIT:
+        msg = f"skill inspection response is too large: {script_path}"
+        raise RuntimeError(msg)
     try:
-        response = json.loads(completed.stdout)
+        response = json.loads(response_text)
     except json.JSONDecodeError as exc:
-        detail = (completed.stderr or completed.stdout)[-1000:]
-        msg = f"skill inspection returned invalid JSON: {script_path}: {detail}"
+        msg = f"skill inspection returned invalid JSON: {script_path}"
         raise RuntimeError(msg) from exc
     if not isinstance(response, dict) or response.get("ok") is not True:
         error = response.get("error") if isinstance(response, dict) else "invalid response"
