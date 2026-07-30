@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from roi_h import installation
 from roi_h.installation import (
     BUILT_IN_SKILLS,
     HealthCheck,
     InstallationHealthReport,
     inspect_installation_health,
+    managed_browser_root,
 )
 
 
@@ -24,7 +26,7 @@ def _checks_by_code(report: InstallationHealthReport) -> dict[str, HealthCheck]:
     return {check.code: check for check in report.checks}
 
 
-def test_inspect_reports_a_healthy_managed_install(tmp_path: Path) -> None:
+def test_inspect_reports_a_healthy_managed_install(tmp_path: Path, monkeypatch) -> None:
     install_root = tmp_path / "install"
     data_home = tmp_path / "data"
     skills_root = tmp_path / "skills"
@@ -42,7 +44,18 @@ def test_inspect_reports_a_healthy_managed_install(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     (install_root / "current").write_text("versions/0.1.0\n", encoding="utf-8")
-    (install_root / "browsers" / "chromium-1228").mkdir(parents=True)
+    browser_root = install_root / "browsers"
+    (browser_root / "chromium-1228").mkdir(parents=True)
+    monkeypatch.setattr(
+        installation,
+        "_probe_browser",
+        lambda root, revision: {
+            "browser_root": str(root),
+            "executable": str(revision / "chrome"),
+            "browser_version": "149.0",
+            "playwright_version": "1.61.0",
+        },
+    )
 
     report = inspect_installation_health(
         install_root=install_root,
@@ -70,7 +83,9 @@ def test_inspect_reports_a_healthy_managed_install(tmp_path: Path) -> None:
         "runtime.socket_bootstrap",
         "runtime.tls_bootstrap",
     ]
-    assert _checks_by_code(report)["browser.launch"].status == "pass"
+    browser = _checks_by_code(report)["browser.launch"]
+    assert browser.status == "pass"
+    assert browser.details["browser_root"] == str(browser_root)
     assert _checks_by_code(report)["runtime.socket_bootstrap"].status == "pass"
     assert _checks_by_code(report)["runtime.tls_bootstrap"].status == "pass"
 
@@ -195,3 +210,54 @@ def test_managed_install_fails_when_required_browser_is_missing(
         "reason": "revision_missing",
         "revision": "chromium-1228",
     }
+
+
+def test_managed_install_fails_when_browser_cannot_launch(tmp_path: Path, monkeypatch) -> None:
+    install_root = tmp_path / "install"
+    skills_root = tmp_path / "skills"
+    _make_skills(skills_root)
+    (install_root / "browsers" / "chromium-1228").mkdir(parents=True)
+    (install_root / "current").write_text("0.1.3\n", encoding="utf-8")
+    (install_root / "install-state.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "active_version": "0.1.3",
+                "browser_revision": "chromium-1228",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fail_probe(*_args):
+        message = "browser exited"
+        raise RuntimeError(message)
+
+    monkeypatch.setattr(installation, "_probe_browser", fail_probe)
+    report = inspect_installation_health(
+        install_root=install_root,
+        data_home=tmp_path / "data",
+        application_version="0.1.3",
+        python_version=(3, 12, 0),
+        skills_root=skills_root,
+    )
+
+    browser = _checks_by_code(report)["browser.launch"]
+    assert report.healthy is False
+    assert browser.status == "fail"
+    assert browser.details == {
+        "reason": "launch_failed",
+        "revision": "chromium-1228",
+        "error": "RuntimeError: browser exited",
+    }
+
+
+def test_windows_browser_root_is_outside_the_package(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setattr(installation, "_WINDOWS", True)
+
+    assert (
+        managed_browser_root(tmp_path / "read-only-package")
+        == (tmp_path / "local" / "ROI-H" / "Browsers").resolve()
+    )

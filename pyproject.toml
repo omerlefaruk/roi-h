@@ -14,7 +14,7 @@ dependencies = [
   "activegraph==1.10.0",
   "jsonschema==4.26.0",
   "openpyxl>=3.1.5",
-  "playwright>=1.61.0",
+  "playwright==1.61.0",
   "pydantic==2.13.4",
 ]
 
