@@ -231,8 +231,11 @@ if [ -e "$launcher" ] && [ ! -L "$launcher" ] && \
     fail "The ROI-H launcher path contains a file that is not managed by ROI-H."
 fi
 root_pointer=$bin_root/.roi-h-install-root
+data_pointer=$bin_root/.roi-h-data-home
 printf '%s\n' "$install_root" > "$root_pointer.tmp"
+printf '%s\n' "$data_home" > "$data_pointer.tmp"
 mv -f "$root_pointer.tmp" "$root_pointer"
+mv -f "$data_pointer.tmp" "$data_pointer"
 temporary_launcher=$bin_root/.roi-h-launcher.tmp
 cat > "$temporary_launcher" <<'ROI_H_LAUNCHER'
 #!/bin/sh
@@ -240,7 +243,11 @@ cat > "$temporary_launcher" <<'ROI_H_LAUNCHER'
 set -eu
 launcher_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 IFS= read -r install_root < "$launcher_root/.roi-h-install-root"
+IFS= read -r data_home < "$launcher_root/.roi-h-data-home"
 export ROI_H_INSTALL_ROOT="$install_root"
+if [ -z "${ROI_H_HOME:-}" ]; then
+    export ROI_H_HOME="$data_home"
+fi
 export PLAYWRIGHT_BROWSERS_PATH="$install_root/browsers"
 export PLAYWRIGHT_SKIP_BROWSER_GC=1
 exec "$install_root/current/bin/roi-h" "$@"

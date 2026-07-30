@@ -3,10 +3,15 @@
 from pathlib import Path
 
 import pytest
+from pydantic import BaseModel, ValidationError
 
 from roi_h.harness import loader
 from roi_h.harness.loader import default_skills_root, load_skills
-from roi_h.harness.skill_contract import skill_tree_digest
+from roi_h.harness.skill_contract import (
+    skill_tree_digest,
+    strict_skill_model,
+    strict_skill_schema,
+)
 
 _SHARED_TOOL = """\
 from pydantic import BaseModel
@@ -53,6 +58,22 @@ def test_load_skills_discovers_browser_stub_tools() -> None:
     assert catalog.resolve("browser", "session_status").effect == "read"
     assert catalog.resolve("browser", "navigate").network_hosts == ("*",)
     assert catalog.resolve("http", "get").network_hosts == ("*",)
+
+
+def test_strict_skill_models_reject_nested_coercion_and_extra_fields() -> None:
+    class Nested(BaseModel):
+        count: int
+
+    class Input(BaseModel):
+        nested: Nested
+
+    strict = strict_skill_model(Input)
+
+    with pytest.raises(ValidationError):
+        strict.model_validate({"nested": {"count": "1", "unknown": True}})
+    nested_schema = strict_skill_schema(Input)["$defs"]
+    assert isinstance(nested_schema, dict)
+    assert nested_schema["Nested"]["additionalProperties"] is False
 
 
 def test_trusted_skill_import_keeps_its_tree_digest(

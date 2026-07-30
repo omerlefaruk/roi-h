@@ -7,7 +7,7 @@ import importlib.machinery
 import re
 from pathlib import Path
 from types import ModuleType
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -98,8 +98,8 @@ def inspect_module(
         secret_names=tuple(sorted({*declared_secrets, *_REQUIRED_SECRET_RE.findall(source)})),
         network_hosts=_string_tuple(module, "NETWORK_HOSTS"),
         filesystem_roots=_string_tuple(module, "FILESYSTEM_ROOTS"),
-        input_schema=strict_skill_model(input_model).model_json_schema(),
-        output_schema=strict_skill_model(output_model).model_json_schema(),
+        input_schema=strict_skill_schema(input_model),
+        output_schema=strict_skill_schema(output_model),
     )
 
 
@@ -133,9 +133,38 @@ def skill_tree_digest(root: Path, *, reject_bytecode: bool) -> str:
 
 
 def strict_skill_model(model: type[BaseModel]) -> type[BaseModel]:
-    """Return an inherited model with strict, closed object validation."""
+    """Return an inherited model with recursive strict, closed validation."""
     config = ConfigDict(**{**model.model_config, "extra": "forbid", "strict": True})
-    return type(f"Strict{model.__name__}", (model,), {"model_config": config})
+
+    def model_validate(cls: Any, value: object, /, *args: Any, **kwargs: Any) -> Any:
+        kwargs.setdefault("strict", True)
+        kwargs.setdefault("extra", "forbid")
+        return cls.__pydantic_validator__.validate_python(value, *args, **kwargs)
+
+    strict_model = type(
+        f"Strict{model.__name__}",
+        (model,),
+        {"model_config": config, "model_validate": classmethod(model_validate)},
+    )
+    return cast("type[BaseModel]", strict_model)
+
+
+def strict_skill_schema(model: type[BaseModel]) -> dict[str, object]:
+    """Return the JSON Schema for recursive strict, closed model validation."""
+    schema = strict_skill_model(model).model_json_schema()
+
+    def close_objects(value: object) -> None:
+        if isinstance(value, dict):
+            if value.get("type") == "object" and "properties" in value:
+                value.setdefault("additionalProperties", False)
+            for item in value.values():
+                close_objects(item)
+        elif isinstance(value, list):
+            for item in value:
+                close_objects(item)
+
+    close_objects(schema)
+    return schema
 
 
 def _effect(
@@ -188,4 +217,5 @@ __all__ = [
     "inspect_module",
     "skill_tree_digest",
     "strict_skill_model",
+    "strict_skill_schema",
 ]
