@@ -2083,10 +2083,10 @@ Commands must distinguish:
 
 ## 28. CLI Target
 
-This section defines the storage command groups. The versioned machine contract,
-operation catalog, and safe retry rules are defined in
-[`external-ai-cli-plan.md`](external-ai-cli-plan.md). New CLI work must follow both
-documents.
+This section defines the storage command groups. The
+[external-AI operator guide](external-ai-cli-operator-guide.md) defines safe retries and
+the machine interface. The live manifest from `roi-h agent describe` defines the
+operation catalog. New CLI work must follow both sources.
 
 ### Project
 

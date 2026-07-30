@@ -29,17 +29,17 @@ Read these files completely:
 1. `AGENTS.md`
 2. `docs/release-implementation-plan.md`
 3. `docs/distribution-and-updates.md`
-4. `docs/external-ai-cli-plan.md`
-5. `docs/handoffs/external-ai-cli-implementation-handoff.md`
-6. `docs/project-storage-activegraph-refactor.md`
-7. `README.md`
-8. `pyproject.toml`
-9. `scripts/qualify_release.py`
-10. `scripts/check_publication_boundary.py`
+4. `docs/external-ai-cli-operator-guide.md`
+5. `docs/project-storage-activegraph-refactor.md`
+6. `README.md`
+7. `pyproject.toml`
+8. `scripts/qualify_release.py`
+9. `scripts/check_publication_boundary.py`
 
 Use `docs/release-implementation-plan.md` as the implementation authority. Use the
 distribution document for product policy and the storage document for user-data safety.
-Use the external-AI contract for machine results and error behavior.
+Use the external-AI operator guide and live operation manifest for machine results and
+error behavior.
 
 ## Working-Tree Rules
 

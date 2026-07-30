@@ -39,7 +39,7 @@ def test_wheel_contains_only_roi_h_and_distribution_metadata(tmp_path: Path) -> 
     assert "roi_h/application.py" not in names
     assert "roi_h/domain.py" not in names
     assert not any(name.startswith("roi_h/packs/") for name in names)
-    assert "roi_h/_skills/SKILL.md" in names
+    assert "roi_h/_skills/SKILL.md" not in names
     assert "roi_h/_skills/browser/scripts/navigate.py" in names
     assert not any(name.startswith(("roi_h/ata/", "roi_h/_skills/ata/")) for name in names)
     assert all(name.startswith(("roi_h/", "roi_h-")) for name in names)

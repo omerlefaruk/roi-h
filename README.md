@@ -70,11 +70,12 @@ repository or Python distribution.
 The authoritative data-home and project-storage rules are in
 [`docs/project-storage-activegraph-refactor.md`](docs/project-storage-activegraph-refactor.md);
 application distribution and publication boundaries are in
-[`docs/distribution-and-updates.md`](docs/distribution-and-updates.md); and the stable
-external-AI CLI plan is in
-[`docs/external-ai-cli-plan.md`](docs/external-ai-cli-plan.md). Its paste-ready
-implementation handoff is in
-[`docs/handoffs/external-ai-cli-implementation-handoff.md`](docs/handoffs/external-ai-cli-implementation-handoff.md).
+[`docs/distribution-and-updates.md`](docs/distribution-and-updates.md); and the installed
+external-AI interface is documented in the
+[`operator guide`](docs/external-ai-cli-operator-guide.md). The live operation manifest
+from `roi-h agent describe` is the machine-contract authority. The retained
+[primary-source research](docs/research/external-ai-cli-primary-research.md) records the
+security basis for this interface.
 The release, installer, update, and rollback implementation plan is in
 [`docs/release-implementation-plan.md`](docs/release-implementation-plan.md), with its
 handoff in
