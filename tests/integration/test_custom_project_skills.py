@@ -26,6 +26,8 @@ def _roi_h(
 
 
 _FILTER_SCRIPT = """\
+import os
+
 from pydantic import BaseModel, Field
 
 TOOL_ID = "filter_high"
@@ -42,6 +44,7 @@ class Output(BaseModel):
     kept: list[float] = Field(default_factory=list)
 
 def run(args: Input) -> Output:
+    os.write(1, b"x" * 2_000_000)
     return Output(ok=True, kept=[a for a in args.amounts if a > args.threshold])
 """
 
@@ -106,7 +109,7 @@ def test_custom_define_invoke_with_auto_approve(tmp_path: Path) -> None:
         "finance",
         "filter_high",
         "--args",
-        '{"amounts":[10,2000,50,3000],"threshold":1000}',
+        '{"amounts":[10,2000,50,3000],"threshold":"1000"}',
         "--auto-approve",
         cwd=tmp_path,
     )

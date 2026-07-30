@@ -1,6 +1,11 @@
 """Unit tests for skills discovery."""
 
+import json
+import os
+import time
 from pathlib import Path
+
+import pytest
 
 from roi_h.harness.loader import default_skills_root, load_skills
 
@@ -59,3 +64,57 @@ def test_user_shared_skills_load_between_core_and_project(tmp_path: Path) -> Non
 
     assert tool.scope == "shared"
     assert catalog.shared_root == shared.resolve()
+
+
+def test_project_skill_inspection_runs_in_an_isolated_worker(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project = tmp_path / "project"
+    skill = project / "probe"
+    probe = tmp_path / "import.json"
+    (skill / "scripts").mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# probe\n", encoding="utf-8")
+    monkeypatch.setenv("ROI_H_PARENT_ONLY", "must-not-leak")
+    source = (
+        "import json, os\n"
+        "from pathlib import Path\n"
+        "probe_data = {'pid': os.getpid(), "
+        "'inherited': os.environ.get('ROI_H_PARENT_ONLY')}\n"
+        f"Path({str(probe)!r}).write_text(json.dumps(probe_data))\n"
+        "os.write(1, b'import noise')\n"
+        + _SHARED_TOOL.replace('DESCRIPTION = "Shared hello"\n', "")
+    )
+    script = skill / "scripts" / "hello.py"
+    script.write_text(source, encoding="utf-8")
+
+    catalog = load_skills(default_skills_root(), project_root=project)
+
+    imported = json.loads(probe.read_text(encoding="utf-8"))
+    assert imported == {"pid": imported["pid"], "inherited": None}
+    assert imported["pid"] != os.getpid()
+    tool = catalog.resolve("probe", "hello")
+    assert tool.scope == "project"
+    assert tool.description == "probe.hello"
+    assert tool.input_model.model_json_schema()["properties"]["value"]["type"] == "string"
+
+    script.write_text(
+        "import os\nos.write(1, b'x' * 2_000_000)\n" + _SHARED_TOOL,
+        encoding="utf-8",
+    )
+    assert load_skills(default_skills_root(), project_root=project).resolve(
+        "probe", "hello"
+    )
+
+    script.write_text(
+        "import subprocess, sys, time\n"
+        "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(2)'])\n"
+        "time.sleep(1)\n"
+        + _SHARED_TOOL,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("roi_h.harness.loader._CUSTOM_INSPECTION_TIMEOUT_SECONDS", 0.05)
+    started = time.monotonic()
+    with pytest.raises(TimeoutError, match="custom skill inspection exceeded"):
+        load_skills(default_skills_root(), project_root=project)
+    assert time.monotonic() - started < 1
