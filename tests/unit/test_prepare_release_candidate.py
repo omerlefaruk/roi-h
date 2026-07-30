@@ -9,6 +9,8 @@ import sys
 import tarfile
 from pathlib import Path
 
+import pytest
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 PREPARER = REPOSITORY_ROOT / "scripts" / "prepare_release_candidate.py"
 
@@ -18,6 +20,7 @@ def _write_executable(path: Path, content: str) -> None:
     path.chmod(0o755)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="uses POSIX fake release tools")
 def test_preparer_builds_locked_wheelhouse_and_bundle(tmp_path: Path) -> None:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()

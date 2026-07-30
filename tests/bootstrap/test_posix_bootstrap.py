@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.skipif(os.name == "nt", reason="requires a POSIX shell")
+
 
 def test_posix_bootstrap_has_a_complete_stable_release_identity() -> None:
     script = (Path(__file__).parents[2] / "install.sh").read_text(encoding="utf-8")

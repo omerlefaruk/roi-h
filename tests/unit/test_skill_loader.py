@@ -51,7 +51,7 @@ def test_load_skills_exposes_only_named_workflow_tools() -> None:
     }
     navigate = catalog.resolve("browser", "navigate")
     assert navigate.deterministic is False
-    assert str(navigate.script_path).endswith("skills/browser/scripts/navigate.py")
+    assert navigate.script_path.as_posix().endswith("skills/browser/scripts/navigate.py")
     assert navigate.network_hosts == ("*",)
     assert catalog.resolve("browser", "snapshot").allow_in_prod is False
     assert catalog.resolve("files", "hash").effect == "read"

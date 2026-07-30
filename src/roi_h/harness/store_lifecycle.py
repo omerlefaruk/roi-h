@@ -7,6 +7,7 @@ import os
 import shutil
 import sqlite3
 import tempfile
+from contextlib import closing
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -116,7 +117,7 @@ class StoreLifecycle:
             )
         warnings: list[str] = []
         try:
-            with _connect_read_only(path) as connection:
+            with closing(_connect_read_only(path)) as connection:
                 journal = str(connection.execute("PRAGMA journal_mode").fetchone()[0]).lower()
                 synchronous = int(connection.execute("PRAGMA synchronous").fetchone()[0])
                 timeout = int(connection.execute("PRAGMA busy_timeout").fetchone()[0])
@@ -167,7 +168,7 @@ class StoreLifecycle:
         errors: list[str] = []
         warnings = list(status.warnings)
         try:
-            with _connect_read_only(workspace.db) as connection:
+            with closing(_connect_read_only(workspace.db)) as connection:
                 quick = str(connection.execute("PRAGMA quick_check").fetchone()[0])
                 checks["quick_check"] = quick
                 if quick != "ok":
@@ -218,13 +219,20 @@ class StoreLifecycle:
         staging.unlink()
         lock = _maintenance_lock(workspace)
         try:
-            with lock, sqlite3.connect(workspace.db) as source, sqlite3.connect(staging) as dest:
-                source.execute("PRAGMA busy_timeout = 10000")
-                source.backup(dest)
-                integrity = str(dest.execute("PRAGMA integrity_check").fetchone()[0])
-                if integrity != "ok":
-                    msg = f"store.integrity_failed: backup: {integrity}"
-                    raise RuntimeError(msg)  # noqa: TRY301
+            with lock:
+                source = sqlite3.connect(workspace.db)
+                dest = sqlite3.connect(staging)
+                try:
+                    source.execute("PRAGMA busy_timeout = 10000")
+                    source.backup(dest)
+                    dest.commit()
+                    integrity = str(dest.execute("PRAGMA integrity_check").fetchone()[0])
+                    if integrity != "ok":
+                        msg = f"store.integrity_failed: backup: {integrity}"
+                        raise RuntimeError(msg)
+                finally:
+                    dest.close()
+                    source.close()
             digest, size = hash_file(staging)
             created_at = datetime.now(UTC).isoformat()
             manifest = {
@@ -279,11 +287,14 @@ class StoreLifecycle:
                 stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
                 previous_path = live.with_name(f"{live.name}.pre-restore-{stamp}")
                 current_status = self.inspect(workspace)
-                with (
-                    sqlite3.connect(live) as current,
-                    sqlite3.connect(previous_path) as previous_store,
-                ):
+                current = sqlite3.connect(live)
+                previous_store = sqlite3.connect(previous_path)
+                try:
                     current.backup(previous_store)
+                    previous_store.commit()
+                finally:
+                    previous_store.close()
+                    current.close()
                 previous_digest, previous_size = hash_file(previous_path)
                 atomic_write_json(
                     previous_path.with_name(previous_path.name + ".manifest.json"),
@@ -306,11 +317,14 @@ class StoreLifecycle:
             try:
                 shutil.copyfile(source, staging)
                 staging.chmod(0o600)
-                with sqlite3.connect(staging) as connection:
+                connection = sqlite3.connect(staging)
+                try:
                     integrity = str(connection.execute("PRAGMA integrity_check").fetchone()[0])
                     if integrity != "ok":
                         msg = f"store.restore_failed: {integrity}"
                         raise RuntimeError(msg)
+                finally:
+                    connection.close()
                 staging.replace(live)
             finally:
                 if staging.exists():

@@ -585,7 +585,7 @@ def _windows_credential_api() -> tuple[Any, type[Any], Any]:
             ("UserName", wintypes.LPWSTR),
         ]
 
-    loader = ctypes.WinDLL  # type: ignore[attr-defined]
+    loader = ctypes.__dict__["WinDLL"]
     return ctypes, Credential, loader("Advapi32.dll", use_last_error=True)
 
 

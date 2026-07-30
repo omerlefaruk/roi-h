@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -45,7 +46,11 @@ def _distribution_artifacts(
 def main() -> int:
     """Qualify the supported Python runtime and build release artifacts once."""
     _run([sys.executable, "scripts/check_publication_boundary.py"])
-    _run(["/bin/sh", "-n", "install.sh"])
+    shell = shutil.which("sh")
+    if shell is None:
+        sys.stdout.write("\n==> sh -n install.sh (skipped: sh is not installed)\n")
+    else:
+        _run([shell, "-n", "install.sh"])
     _run(["uv", "sync", "--locked", "--python", PYTHON_VERSION, "--group", "dev"])
     _run(
         [

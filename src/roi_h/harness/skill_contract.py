@@ -26,6 +26,9 @@ _READ_PREFIXES = (
 )
 _DESTRUCTIVE_TOKENS = ("delete", "remove", "drop", "purge", "shell", "run")
 _REQUIRED_SECRET_RE = re.compile(r"""require_secret\(\s*["']([A-Za-z0-9_.-]+)["']""")
+_NATIVE_EXTENSION_SUFFIXES = frozenset(
+    (*importlib.machinery.EXTENSION_SUFFIXES, ".dll", ".dylib", ".pyd", ".so")
+)
 
 
 class SkillInspection(BaseModel):
@@ -120,7 +123,7 @@ def skill_tree_digest(root: Path, *, reject_bytecode: bool) -> str:
         if bytecode:
             continue
         if reject_bytecode and any(
-            path.name.endswith(suffix) for suffix in importlib.machinery.EXTENSION_SUFFIXES
+            path.name.endswith(suffix) for suffix in _NATIVE_EXTENSION_SUFFIXES
         ):
             msg = f"custom skill tree contains a native Python extension: {relative}"
             raise ValueError(msg)

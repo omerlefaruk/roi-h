@@ -106,10 +106,13 @@ def test_store_backup_is_consistent_and_restore_is_staged(tmp_path: Path) -> Non
     backup = lifecycle.backup(workspace, backup_path)
     assert backup.sha256.startswith("sha256:")
     assert Path(backup.manifest_path).is_file()
+    assert harness.runtime.graph.store is not None
+    harness.runtime.graph.store.close()
 
     with sqlite3.connect(workspace.db) as connection:
         original_events = connection.execute("SELECT COUNT(*) FROM events").fetchone()[0]
         connection.execute("DELETE FROM events")
+    connection.close()
     restored = lifecycle.restore(workspace, backup_path)
     assert restored.ok is True
     assert restored.previous_backup is not None

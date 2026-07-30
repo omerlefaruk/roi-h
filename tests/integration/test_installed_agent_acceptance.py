@@ -55,7 +55,8 @@ def test_installed_cli_agent_acceptance_from_empty_home(  # noqa: PLR0915
         check=False,
     )
     assert create_environment.returncode == 0, create_environment.stdout + create_environment.stderr
-    python = environment / "bin" / "python"
+    scripts = environment / ("Scripts" if os.name == "nt" else "bin")
+    python = scripts / ("python.exe" if os.name == "nt" else "python")
     install = subprocess.run(  # noqa: S603
         [
             uv,
@@ -71,7 +72,7 @@ def test_installed_cli_agent_acceptance_from_empty_home(  # noqa: PLR0915
         check=False,
     )
     assert install.returncode == 0, install.stdout + install.stderr
-    executable = environment / "bin" / "roi-h"
+    executable = scripts / ("roi-h.exe" if os.name == "nt" else "roi-h")
     home = tmp_path / "empty-home"
     isolated_cwd = tmp_path / "agent-work"
     isolated_cwd.mkdir()

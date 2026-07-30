@@ -9,7 +9,6 @@ Run it only as ``python -m roi_h.harness.macos_native_package_prototype``.
 from __future__ import annotations
 
 import argparse
-import fcntl
 import hashlib
 import json
 import os
@@ -26,6 +25,11 @@ import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
+
+if sys.platform == "darwin":
+    import fcntl
+else:
+    fcntl = None
 
 _PROBE_OUTPUT = "ROI-H managed Chromium prototype"
 _PACKAGE_ID = "com.roih.wayfinder.issue14.prototype"
@@ -884,9 +888,9 @@ def _acquire_native_lock(home: Path) -> tuple[int, Path]:
     path.parent.mkdir(parents=True, exist_ok=True)
     if os.path.lexists(path) and path.is_symlink():
         raise RuntimeError(f"native journey lock must not be a symlink: {path}")
-    descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)  # type: ignore[attr-defined]
     try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)  # type: ignore[attr-defined]
     except OSError:
         os.close(descriptor)
         raise RuntimeError("another issue #14 native journey holds the exclusive lock") from None
@@ -899,7 +903,7 @@ def _release_native_lock(descriptor: int, path: Path) -> None:
         if path.exists() and not path.is_symlink() and path.stat().st_ino == current.st_ino:
             path.unlink()
     finally:
-        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        fcntl.flock(descriptor, fcntl.LOCK_UN)  # type: ignore[attr-defined]
         os.close(descriptor)
 
 
@@ -1212,7 +1216,7 @@ def _native_install(
 
 
 def _assert_current_user_owned(root: Path) -> dict[str, Any]:
-    expected_uid = os.getuid()
+    expected_uid = os.getuid()  # type: ignore[attr-defined]
     checked = 0
     for path in (root, *root.rglob("*")):
         if path.lstat().st_uid != expected_uid:
