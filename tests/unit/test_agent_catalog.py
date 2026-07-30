@@ -7,28 +7,23 @@ from pathlib import Path
 import pytest
 
 from roi_h.agent.catalog import OperationCatalog, OperationDefinition, build_catalog
-from roi_h.agent.contract import (
-    CommandRequest,
-    Effect,
-    Idempotency,
-    OperationManifest,
-)
+from roi_h.agent.contract import CommandRequest, Effect, Idempotency, OperationManifest
+from roi_h.agent.operation_models import InputArguments, OperationResult
 
 
 def _definition(operation_id: str) -> OperationDefinition:
+    class TestInput(InputArguments):
+        pass
+
+    class TestOutput(OperationResult):
+        pass
+
     return OperationDefinition(
         manifest=OperationManifest(
             operation_id=operation_id,
             description="Test operation.",
-            input_schema={
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "type": "object",
-                "additionalProperties": False,
-            },
-            output_schema={
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "type": "object",
-            },
+            input_schema=TestInput.model_json_schema(),
+            output_schema=TestOutput.model_json_schema(),
             effect=Effect.READ,
             idempotency=Idempotency.NOT_APPLICABLE,
             approval_rule="none",
@@ -41,6 +36,8 @@ def _definition(operation_id: str) -> OperationDefinition:
             timeout_seconds=10,
         ),
         handler=lambda _request: {"value": "ok"},
+        input_model=TestInput,
+        output_model=TestOutput,
     )
 
 

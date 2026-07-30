@@ -6,17 +6,15 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from jsonschema import Draft202012Validator
-
 from roi_h import __version__
 from roi_h.agent.contract import (
-    JSON_SCHEMA_DIALECT,
     CommandRequest,
     Effect,
     ExecutionMode,
     Idempotency,
     OperationManifest,
 )
+from roi_h.agent.operation_models import OperationModel, input_model, output_model
 from roi_h.agent.read_operations import (
     approval_list,
     approval_show,
@@ -41,7 +39,6 @@ from roi_h.agent.read_operations import (
     tool_list,
     tool_show,
 )
-from roi_h.agent.schemas import input_schema, output_schema
 from roi_h.agent.tasks import task_cancel, task_events, task_list, task_show, task_wait
 from roi_h.agent.workflow_operations import (
     artifact_export,
@@ -97,10 +94,12 @@ OperationHandler = Callable[[CommandRequest], dict[str, Any]]
 
 @dataclass(frozen=True)
 class OperationDefinition:
-    """One public manifest and its private handler."""
+    """One public manifest, its validation models, and its private handler."""
 
     manifest: OperationManifest
     handler: OperationHandler
+    input_model: OperationModel
+    output_model: OperationModel
 
 
 class OperationCatalog:
@@ -116,33 +115,32 @@ class OperationCatalog:
         if operation_id in self._operations:
             msg = f"duplicate operation ID: {operation_id}"
             raise ValueError(msg)
-        for schema_name, schema in (
-            ("input", definition.manifest.input_schema),
-            ("output", definition.manifest.output_schema),
+        for schema_name, model, schema in (
+            ("input", definition.input_model, definition.manifest.input_schema),
+            ("output", definition.output_model, definition.manifest.output_schema),
         ):
-            if schema.get("$schema") != JSON_SCHEMA_DIALECT:
-                msg = f"{operation_id} {schema_name} schema must use JSON Schema 2020-12"
+            if schema != model.model_json_schema():
+                msg = f"{operation_id} {schema_name} schema must come from its Pydantic model"
                 raise ValueError(msg)
-            Draft202012Validator.check_schema(schema)
         self._operations[operation_id] = definition
 
-    def describe(self, operation_id: str | None = None) -> list[OperationManifest]:
-        """Describe all operations or one selected operation."""
-        if operation_id is not None:
-            definition = self._operations.get(operation_id)
-            if definition is None:
-                msg = f"operation not found: {operation_id}"
-                raise KeyError(msg)
-            return [definition.manifest]
-        return [self._operations[key].manifest for key in sorted(self._operations)]
-
-    def execute(self, operation_id: str, request: CommandRequest) -> dict[str, Any]:
-        """Run one operation handler."""
+    def definition(self, operation_id: str) -> OperationDefinition:
+        """Return one complete operation definition."""
         definition = self._operations.get(operation_id)
         if definition is None:
             msg = f"operation not found: {operation_id}"
             raise KeyError(msg)
-        return definition.handler(request)
+        return definition
+
+    def describe(self, operation_id: str | None = None) -> list[OperationManifest]:
+        """Describe all operations or one selected operation."""
+        if operation_id is not None:
+            return [self.definition(operation_id).manifest]
+        return [self._operations[key].manifest for key in sorted(self._operations)]
+
+    def execute(self, operation_id: str, request: CommandRequest) -> dict[str, Any]:
+        """Run one operation handler."""
+        return self.definition(operation_id).handler(request)
 
 
 def build_catalog() -> OperationCatalog:
@@ -153,7 +151,6 @@ def build_catalog() -> OperationCatalog:
             "system.describe",
             "Describe all operations or one selected operation.",
             _system_describe,
-            properties={"operation": {"type": ["string", "null"]}},
         )
     )
     for operation_id, description, handler in (
@@ -169,65 +166,8 @@ def build_catalog() -> OperationCatalog:
                 description,
                 handler,
                 pagination=operation_id in {"run.list", "run.events"},
-                properties={
-                    "home": {"type": ["string", "null"]},
-                    "db": {"type": ["string", "null"]},
-                    "run_id": {"type": ["string", "null"]},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 200},
-                    "cursor": {"type": ["string", "null"]},
-                    "after": {"type": ["string", "null"]},
-                },
             )
         )
-    common_properties = {
-        "home": {"type": ["string", "null"]},
-        "db": {"type": ["string", "null"]},
-        "project": {"type": ["string", "null"]},
-        "environment": {"enum": ["dev", "prod", None]},
-        "run_id": {"type": ["string", "null"]},
-        "name": {"type": ["string", "null"]},
-        "limit": {"type": "integer", "minimum": 1, "maximum": 200},
-        "cursor": {"type": ["string", "null"]},
-        "skills": {"type": ["string", "null"]},
-        "version": {"type": ["string", "null"]},
-        "version_a": {"type": ["string", "null"]},
-        "version_b": {"type": ["string", "null"]},
-        "approval_id": {"type": ["string", "null"]},
-        "artifact_id": {"type": ["string", "null"]},
-        "plan_id": {"type": ["string", "null"]},
-        "full": {"type": "boolean"},
-        "arguments": {"type": "object"},
-        "source": {"type": ["string", "null"]},
-        "source_path": {"type": ["string", "null"]},
-        "output": {"type": ["string", "null"]},
-        "mode": {"type": ["string", "null"]},
-        "new_name": {"type": ["string", "null"]},
-        "reason": {"type": ["string", "null"]},
-        "by": {"type": ["string", "null"]},
-        "repair": {"type": "boolean"},
-        "description": {"type": ["string", "null"]},
-        "summary": {"type": ["object", "null"]},
-        "error": {"type": ["string", "null"]},
-        "require_artifacts": {"type": ["array", "null"], "items": {"type": "string"}},
-        "skill": {"type": ["string", "null"]},
-        "tool": {"type": ["string", "null"]},
-        "overwrite": {"type": "boolean"},
-        "from_run": {"type": ["string", "null"]},
-        "from_handoff": {"type": ["string", "null"]},
-        "goal": {"type": ["string", "null"]},
-        "notes": {"type": ["string", "null"]},
-        "skills_list": {"type": ["array", "null"], "items": {"type": "string"}},
-        "distill": {"type": "boolean"},
-        "dry_run": {"type": "boolean"},
-        "auto_approve": {"type": ["boolean", "null"]},
-        "force": {"type": "boolean"},
-        "actor": {"type": ["string", "null"]},
-        "set_args": {"type": ["array", "null"], "items": {"type": "string"}},
-        "secret_value": {"type": ["string", "null"]},
-        "policy": {"type": ["object", "null"]},
-        "target": {"type": ["string", "null"]},
-        "use": {"type": "boolean"},
-    }
     for operation_id, description, handler, paginated in (
         ("project.show", "Show one project.", project_show, False),
         ("project.paths", "Show logical project paths.", project_show, False),
@@ -260,7 +200,6 @@ def build_catalog() -> OperationCatalog:
                 description,
                 handler,
                 pagination=paginated,
-                properties=common_properties,
             )
         )
     for operation_id, description, handler, effect, idempotency, plan_rule in (
@@ -337,11 +276,6 @@ def build_catalog() -> OperationCatalog:
                 effect=effect,
                 idempotency=idempotency,
                 plan_rule=plan_rule,
-                properties=common_properties
-                | {
-                    "display_name": {"type": ["string", "null"]},
-                    "use": {"type": "boolean"},
-                },
             )
         )
     for operation_id, description, handler, effect in (
@@ -359,12 +293,6 @@ def build_catalog() -> OperationCatalog:
                 effect=effect,
                 idempotency=Idempotency.NOT_APPLICABLE,
                 pagination=operation_id in {"task.list", "task.events"},
-                properties=common_properties
-                | {
-                    "task_id": {"type": ["string", "null"]},
-                    "after": {"type": ["string", "null"]},
-                    "timeout_seconds": {"type": "number", "minimum": 0},
-                },
             )
         )
     catalog.register(
@@ -372,12 +300,6 @@ def build_catalog() -> OperationCatalog:
             "system.context",
             "Show the bounded selected context.",
             _system_context,
-            properties={
-                "home": {"type": ["string", "null"]},
-                "db": {"type": ["string", "null"]},
-                "project": {"type": ["string", "null"]},
-                "environment": {"enum": ["dev", "prod", None]},
-            },
         )
     )
     catalog.register(
@@ -393,11 +315,6 @@ def build_catalog() -> OperationCatalog:
             "List projects without physical paths.",
             _project_list,
             pagination=True,
-            properties={
-                "home": {"type": ["string", "null"]},
-                "limit": {"type": "integer", "minimum": 1, "maximum": 200},
-                "cursor": {"type": ["string", "null"]},
-            },
         )
     )
     for operation_id, description, handler in (
@@ -409,7 +326,6 @@ def build_catalog() -> OperationCatalog:
                 operation_id,
                 description,
                 handler,
-                properties=common_properties,
             )
         )
     for operation_id, description, handler, effect, idempotency, plan_rule in (
@@ -670,7 +586,6 @@ def build_catalog() -> OperationCatalog:
                 effect=effect,
                 idempotency=idempotency,
                 plan_rule=plan_rule,
-                properties=common_properties,
                 secret_input_paths=["arguments.secret_value"]
                 if operation_id == "secret.set"
                 else [],
@@ -685,7 +600,6 @@ def _read_operation(
     handler: OperationHandler,
     *,
     pagination: bool = False,
-    properties: dict[str, Any] | None = None,
 ) -> OperationDefinition:
     return _operation(
         operation_id,
@@ -694,7 +608,6 @@ def _read_operation(
         effect=Effect.READ,
         idempotency=Idempotency.NOT_APPLICABLE,
         pagination=pagination,
-        properties=properties,
     )
 
 
@@ -707,15 +620,16 @@ def _operation(  # noqa: PLR0913 - Descriptor fields stay explicit at registrati
     idempotency: Idempotency,
     plan_rule: str = "none",
     pagination: bool = False,
-    properties: dict[str, Any] | None = None,
     secret_input_paths: list[str] | None = None,
 ) -> OperationDefinition:
+    operation_input = input_model(operation_id)
+    operation_output = output_model(operation_id, pagination=pagination)
     return OperationDefinition(
         manifest=OperationManifest(
             operation_id=operation_id,
             description=description,
-            input_schema=input_schema(operation_id, properties or {}),
-            output_schema=output_schema(operation_id),
+            input_schema=operation_input.model_json_schema(),
+            output_schema=operation_output.model_json_schema(),
             effect=effect,
             idempotency=idempotency,
             approval_rule="none",
@@ -730,6 +644,8 @@ def _operation(  # noqa: PLR0913 - Descriptor fields stay explicit at registrati
             timeout_seconds=3600 if operation_id == "store.backup" else 30,
         ),
         handler=handler,
+        input_model=operation_input,
+        output_model=operation_output,
     )
 
 
