@@ -1221,6 +1221,16 @@ def _assert_current_user_owned(root: Path) -> dict[str, Any]:
     return {"uid": expected_uid, "entries_checked": checked, "matched": True}
 
 
+def _native_environment(**updates: str) -> dict[str, str]:
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV"}
+    }
+    environment.update(PYTHONDONTWRITEBYTECODE="1", **updates)
+    return environment
+
+
 def _native_version_probe(
     root: Path,
     version: str,
@@ -1243,9 +1253,7 @@ def _native_version_probe(
         },
     }
     executable = runtime / "bin" / "roi-h"
-    environment = dict(os.environ)
-    environment.update(
-        PYTHONDONTWRITEBYTECODE="1",
+    environment = _native_environment(
         ROI_H_HOME=str(roi_h_home),
         ROI_H_INSTALL_ROOT=str(root),
         PLAYWRIGHT_BROWSERS_PATH=str(root / "browsers"),
@@ -1458,7 +1466,7 @@ def _finish_activation(
     launcher = _require_success(
         _run_capture(
             [str(root / "bin" / "roi-h"), "--version"],
-            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            env=_native_environment(),
         ),
         "stable launcher",
     )
