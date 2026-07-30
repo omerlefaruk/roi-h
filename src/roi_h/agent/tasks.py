@@ -1,8 +1,11 @@
-"""Durable home-level task records for long command execution."""
+"""Durable background task records for operations that outlive one CLI call."""
 
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
+import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -23,15 +26,21 @@ if TYPE_CHECKING:
 
 
 class TaskStore:
-    """Persist task state and ordered events outside project stores."""
+    """Persist task state, input, and ordered events in the selected home."""
 
     def __init__(self, home: str | Path | None) -> None:
-        """Bind one data home."""
+        """Bind one data home without creating it until a task is written."""
         self.home = resolve_home(home)
         self.root = self.home / "runtime" / "agent-tasks"
 
-    def begin(self, operation: str, request_id: str) -> OperationTask:
-        """Create a queued task and move it to working."""
+    def begin(
+        self,
+        operation: str,
+        request_id: str,
+        *,
+        request: dict[str, Any],
+    ) -> OperationTask:
+        """Create a queued task and persist the worker request."""
         now = datetime.now(UTC)
         task = OperationTask(
             task_id=f"task_{uuid4().hex}",
@@ -41,20 +50,52 @@ class TaskStore:
             created_at=now,
             updated_at=now,
         )
-        events = [
-            self._event(task, 1, "task.queued", {}),
-            self._event(task, 2, "task.working", {}),
+        self._write(task, [self._event(task, 1, "task.queued", {})], request=request)
+        return task
+
+    def launch(self, task: OperationTask) -> None:
+        """Start the detached worker for one queued task."""
+        command = [
+            sys.executable,
+            "-m",
+            "roi_h.agent.task_worker",
+            "--home",
+            str(self.home),
+            "--task-id",
+            task.task_id,
         ]
-        task = task.model_copy(update={"state": TaskState.WORKING, "updated_at": datetime.now(UTC)})
+        options: dict[str, Any] = {
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "close_fds": True,
+        }
+        if sys.platform == "win32":
+            options["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        else:
+            options["start_new_session"] = True
+        subprocess.Popen(command, **options)  # noqa: S603
+
+    def mark_working(self, task_id: str) -> OperationTask:
+        """Move a queued task to working and append its event."""
+        task = self.show(task_id)
+        if task.state != TaskState.QUEUED:
+            return task
+        task = task.model_copy(update={"state": TaskState.WORKING, "updated_at": _now()})
+        events = self._read_events(task_id)
+        events.append(self._event(task, len(events) + 1, "task.working", {}))
         self._write(task, events)
         return task
 
     def succeed(self, task: OperationTask, result: CommandResult) -> OperationTask:
-        """Set a successful terminal result."""
-        task = task.model_copy(
+        """Set a successful terminal result unless the task was cancelled."""
+        current = self.show(task.task_id)
+        if current.state == TaskState.CANCELLED:
+            return current
+        task = current.model_copy(
             update={
                 "state": TaskState.SUCCEEDED,
-                "updated_at": datetime.now(UTC),
+                "updated_at": _now(),
                 "result": result,
             }
         )
@@ -63,10 +104,33 @@ class TaskStore:
         self._write(task, events)
         return task
 
+    def fail(self, task: OperationTask, result: CommandResult) -> OperationTask:
+        """Set a failed terminal result unless the task was cancelled."""
+        current = self.show(task.task_id)
+        if current.state == TaskState.CANCELLED:
+            return current
+        task = current.model_copy(
+            update={
+                "state": TaskState.FAILED,
+                "updated_at": _now(),
+                "result": result,
+            }
+        )
+        events = self._read_events(task.task_id)
+        events.append(self._event(task, len(events) + 1, "task.failed", {}))
+        self._write(task, events)
+        return task
+
     def show(self, task_id: str) -> OperationTask:
-        """Load one task."""
+        """Load one task without changing its state."""
         raw = self._read(task_id)
         return OperationTask.model_validate(raw["task"])
+
+    def request(self, task_id: str) -> dict[str, Any]:
+        """Load the private worker request for one task."""
+        raw = self._read(task_id)
+        value = raw.get("request")
+        return value if isinstance(value, dict) else {}
 
     def list_tasks(self) -> list[OperationTask]:
         """List tasks newest first."""
@@ -96,14 +160,25 @@ class TaskStore:
             "snapshot": f"task-event:{events[-1].sequence if events else 0}",
         }
 
+    def wait(self, task_id: str, timeout_seconds: float) -> OperationTask:
+        """Wait for a task to finish, then return its current state."""
+        deadline = time.monotonic() + max(0.0, timeout_seconds)
+        while True:
+            task = self.show(task_id)
+            if task.state in {TaskState.SUCCEEDED, TaskState.FAILED, TaskState.CANCELLED}:
+                return task
+            if time.monotonic() >= deadline:
+                return task
+            time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+
     def cancel(self, task_id: str) -> OperationTask:
-        """Cancel a nonterminal task."""
+        """Cancel a queued task; a working task is allowed to finish safely."""
         task = self.show(task_id)
         if task.state in {TaskState.SUCCEEDED, TaskState.FAILED, TaskState.CANCELLED}:
             return task
-        task = task.model_copy(
-            update={"state": TaskState.CANCELLED, "updated_at": datetime.now(UTC)}
-        )
+        if task.state == TaskState.WORKING:
+            return task
+        task = task.model_copy(update={"state": TaskState.CANCELLED, "updated_at": _now()})
         events = self._read_events(task_id)
         events.append(self._event(task, len(events) + 1, "task.cancelled", {}))
         self._write(task, events)
@@ -119,7 +194,7 @@ class TaskStore:
         return TaskEvent(
             event_id=f"event:{sequence}",
             sequence=sequence,
-            timestamp=datetime.now(UTC),
+            timestamp=_now(),
             type=event_type,
             task_id=task.task_id,
             request_id=task.request_id,
@@ -140,12 +215,21 @@ class TaskStore:
     def _read_events(self, task_id: str) -> list[TaskEvent]:
         return [TaskEvent.model_validate(item) for item in self._read(task_id)["events"]]
 
-    def _write(self, task: OperationTask, events: list[TaskEvent]) -> None:
+    def _write(
+        self,
+        task: OperationTask,
+        events: list[TaskEvent],
+        *,
+        request: dict[str, Any] | None = None,
+    ) -> None:
+        existing = self._read(task.task_id) if self._path(task.task_id).is_file() else {}
         atomic_write_json(
             self._path(task.task_id),
             {
+                "schema_version": 1,
                 "task": task.model_dump(mode="json"),
                 "events": [item.model_dump(mode="json") for item in events],
+                "request": request if request is not None else existing.get("request", {}),
             },
             mode=0o600,
         )
@@ -184,12 +268,23 @@ def task_events(request: CommandRequest) -> dict[str, Any]:
 
 
 def task_wait(request: CommandRequest) -> dict[str, Any]:
-    """Return current task state; callers can repeat after timeout."""
-    return task_show(request)
+    """Wait for or poll one task."""
+    timeout = request.arguments.get("timeout_seconds", 0)
+    if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or timeout < 0:
+        message = "timeout_seconds must be a non-negative number"
+        raise ValueError(message)
+    return (
+        TaskStore(request.arguments.get("home"))
+        .wait(
+            _task_id(request),
+            float(timeout),
+        )
+        .model_dump(mode="json")
+    )
 
 
 def task_cancel(request: CommandRequest) -> dict[str, Any]:
-    """Cancel one nonterminal task."""
+    """Cancel one queued task."""
     return (
         TaskStore(request.arguments.get("home")).cancel(_task_id(request)).model_dump(mode="json")
     )
@@ -218,6 +313,10 @@ def _event_sequence(value: str | None) -> int:
         msg = "task event ID is invalid"
         raise ValueError(msg)
     return int(value.removeprefix("event:"))
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
 
 
 __all__ = [

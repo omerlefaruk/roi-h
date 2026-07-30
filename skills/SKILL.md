@@ -75,11 +75,16 @@ Data home: `~/.roi-h` by default; override with `ROI_H_HOME` or `--home`.
 Shared user skills: `$ROI_H_HOME/skills/`
 
 Project layout:
-`$ROI_H_HOME/projects/<name>/{dev,prod}/{rpa.sqlite,skills,artifacts,automations}`
+`$ROI_H_HOME/projects/<name>/{project.json,reference,skills,packages,channels,secrets.meta.json,environments}`
 
-Secrets: `$ROI_H_HOME/projects/<name>/secrets.json`
+Each environment has its own store and run data:
+`$ROI_H_HOME/projects/<name>/environments/{dev,prod}/{store/activegraph.sqlite,runs,runtime}`
 
-Feedback: `$ROI_H_HOME/projects/<name>/feedback/`
+Secret values are stored by the selected OS provider. `secrets.meta.json` contains names
+and provider metadata only.
+
+Run feedback is stored in the ActiveGraph run history. Use `rpa events`, `rpa trace`, or
+`feedback.list` for inspection. Do not read or create a project `feedback.jsonl` file.
 
 ## Phase roles
 
@@ -113,8 +118,8 @@ Browser env: `ROI_H_BROWSER=playwright|stub`, `ROI_H_BROWSER_HEADED=1`, `ROI_H_B
 ## Secrets
 
 ```bash
-roi-h rpa secret set PORTAL_USER alice
-roi-h rpa secret set PORTAL_PASS '…'
+printf '%s' 'alice' | roi-h rpa secret set PORTAL_USER --value-stdin
+printf '%s' '…' | roi-h rpa secret set PORTAL_PASS --value-stdin
 roi-h rpa secret list          # names only
 # in tool args / recipes:
 #   "user": "{{secret.PORTAL_USER}}"
@@ -146,16 +151,17 @@ roi-h rpa run weekly --dry-run
 roi-h rpa run weekly --no-feedback          # skip feedback.record
 ```
 
-Package: `automations/<name>/<ver>/{manifest.json,recipe.json,distill.json,skills/}`.
+Package: `$ROI_H_HOME/projects/<project>/packages/automations/<name>/<ver>/{manifest.json,recipe.json,distill.json,skills/}`.
 
-## Feedback (improve the codebase)
+## Feedback (improve the automation)
 
 After every live `rpa run`, harness calls `feedback.record` with ok/fail summary.
-Review:
+Review the run history:
 
 ```bash
-roi-h rpa invoke --run-id RUN feedback list --args '{"limit":20}'
-# or read: $ROI_H_HOME/projects/<project>/feedback/feedback.jsonl
+roi-h rpa events list --run-id RUN
+roi-h rpa trace show --run-id RUN
+roi-h rpa invoke --run-id RUN feedback list --args '{"limit":20}' --force
 ```
 
 When authoring manually, record lessons:
@@ -182,7 +188,7 @@ headed, fix the **skill** (or harness) in **dev**, re-**ship**. Never hand-edit
 prod fail JSON
   → status / artifacts / events / trace
   → headed re-run (--set headless=false)
-  → feedback.jsonl
+  → run events and trace
   → fix skill in dev
   → ship new version
   → re-run prod
@@ -204,7 +210,7 @@ prod fail JSON
 ```bash
 roi-h rpa env set prod
 roi-h rpa run JOB   # copy run_id from JSON
-# also: $ROI_H_HOME/projects/<project>/feedback/feedback.jsonl
+# feedback is stored with the ActiveGraph run history
 ```
 
 ### 2. Inspect that run
@@ -214,8 +220,8 @@ roi-h rpa status --run-id RUN
 # → error_steps, phases, step errors/outputs, artifacts_root
 
 roi-h rpa artifact list --run-id RUN
-ls "$ROI_H_HOME/projects/<project>/prod/artifacts/RUN/"
-ls "$ROI_H_HOME/projects/<project>/prod/artifacts/RUN/phases/"
+ls "$ROI_H_HOME/projects/<project>/environments/prod/runs/RUN/artifacts/"
+ls "$ROI_H_HOME/projects/<project>/environments/prod/runs/RUN/phases/"
 
 roi-h rpa invoke --run-id RUN feedback list --args '{"limit":20}' --force
 ```
@@ -226,8 +232,8 @@ mirror ActiveGraph's observability API in its CLI.
 Compare the frozen package (do not edit):
 
 ```text
-$ROI_H_HOME/projects/<project>/prod/automations/JOB/<ver>/{recipe,distill,manifest}.json
-$ROI_H_HOME/projects/<project>/prod/automations/JOB/<ver>/skills/
+$ROI_H_HOME/projects/<project>/packages/automations/JOB/<ver>/{recipe,distill,manifest}.json
+$ROI_H_HOME/projects/<project>/packages/automations/JOB/<ver>/skills/
 ```
 
 ### 3. Reproduce with eyes on the UI
@@ -263,7 +269,7 @@ roi-h rpa env set dev
 roi-h rpa start --goal "debug JOB failure: …" --auto-approve \
   --phase explore:role=explore --phase solve:role=work
 
-# edit: $ROI_H_HOME/projects/<project>/dev/skills/<skill>/
+# edit: $ROI_H_HOME/projects/<project>/skills/<skill>/
 # re-invoke project tool with evidence artifacts
 
 roi-h rpa ship --name JOB --version X.Y.Z --from-run DEV_RUN --skill S

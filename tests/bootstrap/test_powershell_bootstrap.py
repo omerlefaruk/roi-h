@@ -47,6 +47,8 @@ def test_powershell_bootstrap_matches_the_pinned_install_contract() -> None:
     assert '"installer\\update.ps1"' in script
     assert '"https://raw.githubusercontent.com/omerlefaruk/roi-h/main/install.ps1"' in script
     assert '[Environment]::SetEnvironmentVariable("Path"' in script
+
+
 def test_powershell_bootstrap_disables_strict_mode_for_uv() -> None:
     script = (Path(__file__).parents[2] / "install.ps1").read_text(encoding="utf-8")
 

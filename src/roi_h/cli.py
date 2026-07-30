@@ -14,14 +14,12 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
-from uuid import uuid4
 
 from activegraph.store.sqlite import SQLiteEventStore
 
 from roi_h import __version__
 from roi_h.agent.cli import main as agent_main
-from roi_h.agent.contract import CommandContext, CommandRequest
-from roi_h.agent.dispatcher import Dispatcher
+from roi_h.agent.human_adapter import call_operation as _call_operation
 from roi_h.harness import RunSession
 from roi_h.harness.automation import list_automations
 from roi_h.harness.custom import define_project_tool
@@ -1371,46 +1369,6 @@ def _cmd_support_bundle(args: argparse.Namespace) -> dict[str, Any]:
         output=args.output,
         limit=args.limit,
     )
-
-
-def _operation_arguments(
-    args: argparse.Namespace,
-    **values: object,
-) -> dict[str, Any]:
-    arguments = {
-        "home": getattr(args, "home", None),
-        "project": getattr(args, "project", None),
-        "environment": getattr(args, "env", None),
-        "skills": getattr(args, "skills", None),
-        **values,
-    }
-    return {key: value for key, value in arguments.items() if value is not None}
-
-
-def _call_operation(
-    args: argparse.Namespace,
-    operation: str,
-    **values: object,
-) -> dict[str, Any]:
-    request = CommandRequest(
-        idempotency_key=getattr(args, "idempotency_key", None) or f"human:{uuid4().hex}",
-        context=CommandContext(
-            project=getattr(args, "project", None),
-            environment=getattr(args, "env", None),
-            run_id=cast("str | None", values.get("run_id")),
-        ),
-        arguments=_operation_arguments(args, **values),
-    )
-    response = Dispatcher().execute(operation, request)
-    if not response.ok:
-        error = response.error
-        message = (
-            f"{error.code}: {error.message}"
-            if error is not None
-            else "operation.failed: operation failed without an error"
-        )
-        raise RuntimeError(message)
-    return {"ok": True, **(response.result or {})}
 
 
 def _cmd_runs_list(args: argparse.Namespace) -> dict[str, Any]:

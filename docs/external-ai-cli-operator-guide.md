@@ -69,6 +69,20 @@ roi-h agent call task.cancel --input task-cancel.json
 Use the last event ID in the next `after` argument. Do not read all pages without a
 limit.
 
+## Background operations
+
+`store.backup` starts a detached durable task. The first response contains a queued task
+ID. Do not assume that the backup is ready. Wait for the terminal state:
+
+```shell
+roi-h agent call store.backup --input backup-request.json
+roi-h agent call task.wait --input task-wait-request.json
+```
+
+Use `task.events` to reconnect to the task event stream. A task can be `queued`,
+`working`, `succeeded`, `failed`, or `cancelled`. A working task is allowed to finish
+when cancellation cannot safely stop its database operation.
+
 ## Destructive operations
 
 Call the `.plan` operation first. Review its exact effects, blockers, state digest, and

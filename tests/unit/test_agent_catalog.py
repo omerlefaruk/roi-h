@@ -65,7 +65,13 @@ def test_default_catalog_describes_and_executes_read_operation(tmp_path: Path) -
             arguments={"home": str(tmp_path / "home")},
         ),
     )
-    assert result == {"items": [], "count": 0}
+    assert result == {
+        "items": [],
+        "count": 0,
+        "next_cursor": None,
+        "has_more": False,
+        "snapshot": "projects:0",
+    }
 
 
 def test_default_catalog_contains_every_contract_1_0_operation() -> None:
