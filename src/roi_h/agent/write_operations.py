@@ -95,6 +95,7 @@ def store_backup(request: CommandRequest) -> dict[str, Any]:
         request.arguments.get("home"),
         project=request.context.project or request.arguments.get("project"),
         env=request.context.environment or request.arguments.get("environment"),
+        db=request.arguments.get("db"),
     )
     request_id = request.request_id or f"req_{uuid4().hex}"
     home = resolve_home(request.arguments.get("home"))
@@ -230,6 +231,7 @@ def _workspace(request: CommandRequest) -> Workspace:
         request.arguments.get("home"),
         project=request.context.project or request.arguments.get("project"),
         env=request.context.environment or request.arguments.get("environment"),
+        db=request.arguments.get("db"),
     )
 
 

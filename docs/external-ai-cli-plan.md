@@ -57,7 +57,7 @@ The product baseline completes much of the former CLI gap list:
 | Artifacts and files | Put, list, export, safe run input, and logical run file listing | Artifact show or bounded preview |
 | Automations | Ship, list, dry-run, and run by version | Show, verify, and compare versions |
 | Secrets | List, set, and delete; macOS projects use Keychain; project files contain metadata only | Standard-input or hidden input; status; native secure providers for each supported platform |
-| Store | Status, quick or full check, backup, staged restore, migrate, and guarded compact | Common plan and apply for restore, migration, and compact |
+| Store | Status, quick or full check, backup, and staged restore | Common plan and apply for restore |
 | Portability | Definition or full `.roih` project export and safe verify or import | Plan and apply when import replaces state |
 | Cleanup | Retention plan, show, and apply with stale-plan rejection | Use the same plan contract for other destructive operations |
 | Diagnostics | Redacted, versioned `show` and `tail` records | Request correlation, bounded filters, and support bundle |
@@ -111,7 +111,7 @@ published interface:
 10. Ship, inspect, verify, compare, and run an automation.
 11. Add, inspect, export, and remove artifacts through logical paths.
 12. Set and delete secrets without putting values in command arguments or output.
-13. Check, back up, restore, migrate, and compact a store through guarded operations.
+13. Check, back up, and restore a store through guarded operations.
 14. Plan, inspect, and apply retention.
 15. Read redacted diagnostics and create a support bundle.
 16. Retry after a lost response without making the same external effect two times.
@@ -286,7 +286,7 @@ The first complete catalog contains these groups:
 | Task | `task.list`, `task.show`, `task.events`, `task.wait`, `task.cancel` |
 | Project | `project.list`, `project.show`, `project.create`, `project.use`, `project.paths`, `project.doctor`, `project.export`, `project.import.verify`, `project.import`, `project.rename`, `project.delete.plan`, `project.delete.apply` |
 | Environment | `environment.show`, `environment.set`, `environment.doctor` |
-| Store | `store.status`, `store.check`, `store.backup`, `store.restore.plan`, `store.restore.apply`, `store.migrate.plan`, `store.migrate.apply`, `store.compact.plan`, `store.compact.apply` |
+| Store | `store.status`, `store.check`, `store.backup`, `store.restore.plan`, `store.restore.apply` |
 | Tool | `tool.list`, `tool.show`, `tool.invoke` |
 | Run | `run.start`, `run.list`, `run.show`, `run.status`, `run.events`, `run.trace`, `run.cancel`, `run.reconcile`, `run.input.add`, `run.files` |
 | Phase | `phase.list`, `phase.begin`, `phase.end`, `phase.fail`, `phase.skip`, `phase.retry` |
@@ -356,8 +356,6 @@ roi-h rpa store status
 roi-h rpa store check
 roi-h rpa store backup --output backup.roih
 roi-h rpa store restore backup.roih
-roi-h rpa store migrate
-roi-h rpa store compact
 
 roi-h rpa input add SOURCE --as NAME --run-id RUN_ID
 roi-h rpa files --run-id RUN_ID
@@ -449,8 +447,7 @@ project store can own it. The catalog must not become another event store.
 ### 9.2 Plan and apply
 
 Retention already has the correct pattern. ROI-H will extend it to project deletion,
-project replacement during import, store restore, store migration, store compact, and
-skill deletion.
+project replacement during import, store restore, and skill deletion.
 
 A plan contains:
 

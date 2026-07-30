@@ -86,11 +86,7 @@ def test_default_catalog_contains_every_contract_1_0_operation() -> None:
                 "project.rename project.delete.plan project.delete.apply"
             ),
             "environment.show environment.set environment.doctor",
-            (
-                "store.status store.check store.backup store.restore.plan "
-                "store.restore.apply store.migrate.plan store.migrate.apply "
-                "store.compact.plan store.compact.apply"
-            ),
+            ("store.status store.check store.backup store.restore.plan store.restore.apply"),
             "tool.list tool.show tool.invoke",
             (
                 "run.start run.list run.show run.status run.events run.trace run.cancel "

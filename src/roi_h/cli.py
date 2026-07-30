@@ -32,11 +32,9 @@ from roi_h.harness.journeys import (
     validate_run_id,
 )
 from roi_h.harness.loader import default_skills_root, load_skills, resolve_skills_root
-from roi_h.harness.logical_paths import LogicalPath, PathResolver, PathScope
 from roi_h.harness.project_archive import ProjectArchive
-from roi_h.harness.retention import RetentionPlanner
 from roi_h.harness.run_storage import RunStorage
-from roi_h.harness.secrets import delete_secret, list_secrets, set_secret
+from roi_h.harness.secrets import list_secrets
 from roi_h.harness.store_lifecycle import StoreLifecycle
 from roi_h.harness.workspace import (
     Workspace,
@@ -45,10 +43,8 @@ from roi_h.harness.workspace import (
     get_active_project,
     init_home,
     list_projects,
-    rename_project,
     resolve_home,
     set_active_env,
-    set_active_project,
 )
 from roi_h.installation import default_install_root, inspect_installation_health
 
@@ -151,10 +147,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         ("rpa", "project", "delete", "apply"): ("rpa", "project", "delete-apply"),
         ("rpa", "store", "restore", "plan"): ("rpa", "store", "restore-plan"),
         ("rpa", "store", "restore", "apply"): ("rpa", "store", "restore-apply"),
-        ("rpa", "store", "migrate", "plan"): ("rpa", "store", "migrate-plan"),
-        ("rpa", "store", "migrate", "apply"): ("rpa", "store", "migrate-apply"),
-        ("rpa", "store", "compact", "plan"): ("rpa", "store", "compact-plan"),
-        ("rpa", "store", "compact", "apply"): ("rpa", "store", "compact-apply"),
     }
     replacement = rewrites.get(tuple(raw_argv[:4]))
     if replacement is not None:
@@ -383,19 +375,6 @@ def _build_parser() -> argparse.ArgumentParser:
         handler=_cmd_store_restore,
         deprecation="use 'rpa store restore plan' and 'rpa store restore apply'",
     )
-    store_migrate = store_sub.add_parser("migrate")
-    _add_workspace_options(store_migrate)
-    store_migrate.set_defaults(
-        handler=_cmd_store_migrate,
-        deprecation="use 'rpa store migrate plan' and 'rpa store migrate apply'",
-    )
-    store_compact = store_sub.add_parser("compact")
-    _add_workspace_options(store_compact)
-    store_compact.add_argument("--apply", action="store_true")
-    store_compact.set_defaults(
-        handler=_cmd_store_compact,
-        deprecation="use 'rpa store compact plan' and 'rpa store compact apply'",
-    )
     store_restore_plan = store_sub.add_parser("restore-plan", help=argparse.SUPPRESS)
     _add_workspace_options(store_restore_plan)
     store_restore_plan.add_argument("source")
@@ -405,23 +384,6 @@ def _build_parser() -> argparse.ArgumentParser:
     store_restore_apply.add_argument("plan_id")
     store_restore_apply.add_argument("--idempotency-key", default=None)
     store_restore_apply.set_defaults(handler=_cmd_store_guarded)
-    store_migrate_plan = store_sub.add_parser("migrate-plan", help=argparse.SUPPRESS)
-    _add_workspace_options(store_migrate_plan)
-    store_migrate_plan.add_argument("--target", default="current")
-    store_migrate_plan.set_defaults(handler=_cmd_store_guarded)
-    store_migrate_apply = store_sub.add_parser("migrate-apply", help=argparse.SUPPRESS)
-    _add_workspace_options(store_migrate_apply)
-    store_migrate_apply.add_argument("plan_id")
-    store_migrate_apply.add_argument("--idempotency-key", default=None)
-    store_migrate_apply.set_defaults(handler=_cmd_store_guarded)
-    store_compact_plan = store_sub.add_parser("compact-plan", help=argparse.SUPPRESS)
-    _add_workspace_options(store_compact_plan)
-    store_compact_plan.set_defaults(handler=_cmd_store_guarded)
-    store_compact_apply = store_sub.add_parser("compact-apply", help=argparse.SUPPRESS)
-    _add_workspace_options(store_compact_apply)
-    store_compact_apply.add_argument("plan_id")
-    store_compact_apply.add_argument("--idempotency-key", default=None)
-    store_compact_apply.set_defaults(handler=_cmd_store_guarded)
 
     # tools
     tools = rpa_sub.add_parser("tools", help="List global + project tools")
@@ -1088,12 +1050,13 @@ def _cmd_project_doctor(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _cmd_project_create(args: argparse.Namespace) -> dict[str, Any]:
-    return create_project(
-        args.home,
-        args.name,
+    return _call_operation(
+        args,
+        "project.create",
+        name=args.name,
         display_name=args.display_name,
-        set_active=args.use,
-        env=args.env,
+        use=args.use,
+        environment=args.env,
     )
 
 
@@ -1106,7 +1069,7 @@ def _cmd_project_delete_apply(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _cmd_project_use(args: argparse.Namespace) -> dict[str, Any]:
-    return set_active_project(args.home, args.name)
+    return _call_operation(args, "project.use", name=args.name)
 
 
 def _cmd_project_init(args: argparse.Namespace) -> dict[str, Any]:
@@ -1146,23 +1109,15 @@ def _cmd_env_show(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _cmd_env_set(args: argparse.Namespace) -> dict[str, Any]:
-    data = set_active_env(args.home, args.name, project=getattr(args, "project", None))
-    return {"ok": True, **data}
+    return _call_operation(args, "environment.set", environment=args.name)
 
 
 def _cmd_store_status(args: argparse.Namespace) -> dict[str, Any]:
-    return StoreLifecycle().inspect(_workspace(args)).to_dict()
+    return _call_operation(args, "store.status")
 
 
 def _cmd_store_check(args: argparse.Namespace) -> dict[str, Any]:
-    return (
-        StoreLifecycle()
-        .check(
-            _workspace(args),
-            "full" if args.full else "quick",
-        )
-        .to_dict()
-    )
+    return _call_operation(args, "store.check", full=args.full)
 
 
 def _cmd_store_backup(args: argparse.Namespace) -> dict[str, Any]:
@@ -1171,22 +1126,6 @@ def _cmd_store_backup(args: argparse.Namespace) -> dict[str, Any]:
 
 def _cmd_store_restore(args: argparse.Namespace) -> dict[str, Any]:
     return StoreLifecycle().restore(_workspace(args), args.source).to_dict()
-
-
-def _cmd_store_migrate(args: argparse.Namespace) -> dict[str, Any]:
-    return StoreLifecycle().migrate(_workspace(args)).to_dict()
-
-
-def _cmd_store_compact(args: argparse.Namespace) -> dict[str, Any]:
-    return (
-        StoreLifecycle()
-        .compact(
-            _workspace(args),
-            {},
-            apply=args.apply,
-        )
-        .to_dict()
-    )
 
 
 def _cmd_store_guarded(args: argparse.Namespace) -> dict[str, Any]:
@@ -1529,31 +1468,11 @@ def _cmd_approval_operation(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _cmd_cancel(args: argparse.Namespace) -> dict[str, Any]:
-    _validate_run_id(args.run_id)
-    ws = _workspace(args)
-    harness = _open_harness(
-        ws,
-        run_id=args.run_id,
-        skills=args.skills,
-        budget=_budget(args),
-        auto_approve=args.auto_approve,
-        create_if_missing=False,
-    )
-    return harness.cancel(reason=args.reason)
+    return _call_operation(args, "run.cancel", run_id=args.run_id, reason=args.reason)
 
 
 def _cmd_reconcile(args: argparse.Namespace) -> dict[str, Any]:
-    _validate_run_id(args.run_id)
-    ws = _workspace(args)
-    harness = _open_harness(
-        ws,
-        run_id=args.run_id,
-        skills=args.skills,
-        budget=_budget(args),
-        auto_approve=args.auto_approve,
-        create_if_missing=False,
-    )
-    return harness.reconcile(repair=args.repair).model_dump(mode="json")
+    return _call_operation(args, "run.reconcile", run_id=args.run_id, repair=args.repair)
 
 
 def _cmd_custom(args: argparse.Namespace) -> dict[str, Any]:
@@ -1618,18 +1537,9 @@ def _cmd_approve(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _cmd_artifact_put(args: argparse.Namespace) -> dict[str, Any]:
-    ws = _workspace(args)
-    harness = _open_harness(
-        ws,
-        run_id=args.run_id,
-        skills=args.skills,
-        budget=_budget(args),
-        auto_approve=args.auto_approve,
-        create_if_missing=False,
+    return _call_operation(
+        args, "artifact.put", run_id=args.run_id, source=args.file, name=args.name
     )
-    result = harness.put_artifact(args.file, name=args.name)
-    result.pop("path", None)
-    return result
 
 
 def _cmd_artifact_list(args: argparse.Namespace) -> dict[str, Any]:
@@ -1688,84 +1598,25 @@ def _cmd_artifact_export(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _cmd_input_add(args: argparse.Namespace) -> dict[str, Any]:
-    ws = _workspace(args)
-    storage = RunStorage(ws)
-    paths = storage.prepare(args.run_id)
-    source = Path(args.source).expanduser().resolve()
-    if source.is_symlink() or not source.is_file():
-        msg = f"run input source is not a regular file: {source}"
-        raise FileNotFoundError(msg)
-    logical = LogicalPath.parse(f"run://input/{args.name}")
-    destination = (
-        PathResolver()
-        .resolve(
-            logical,
-            PathScope(ws, run_id=args.run_id),
-            "create",
-        )
-        .physical
+    return _call_operation(
+        args, "run.input.add", run_id=args.run_id, source=args.source, name=args.name
     )
-    if destination.exists():
-        msg = f"run input already exists: {logical}"
-        raise FileExistsError(msg)
-    staging = paths.input / f".{destination.name}.input"
-    try:
-        shutil.copyfile(source, staging)
-        staging.chmod(0o600)
-        staging.replace(destination)
-    finally:
-        if staging.exists():
-            staging.unlink()
-    return {
-        "ok": True,
-        "run_id": args.run_id,
-        "path": str(logical),
-        "bytes": destination.stat().st_size,
-    }
 
 
 def _cmd_run_files(args: argparse.Namespace) -> dict[str, Any]:
-    ws = _workspace(args)
-    paths = RunStorage(ws).paths(args.run_id)
-    files: list[dict[str, Any]] = []
-    for root_name, root in (
-        ("input", paths.input),
-        ("work", paths.work),
-        ("output", paths.output),
-        ("tmp", paths.tmp),
-    ):
-        if not root.is_dir():
-            continue
-        files.extend(
-            {
-                "path": f"run://{root_name}/{path.relative_to(root).as_posix()}",
-                "bytes": path.stat().st_size,
-            }
-            for path in root.rglob("*")
-            if path.is_file() and not path.is_symlink()
-        )
-    artifacts = [item.to_dict() for item in RunStorage(ws).list(args.run_id)]
-    return {
-        "ok": True,
-        "run_id": args.run_id,
-        "files": files,
-        "artifacts": artifacts,
-    }
+    return _call_operation(args, "run.files", run_id=args.run_id)
 
 
 def _cmd_gc_plan(args: argparse.Namespace) -> dict[str, Any]:
-    ws = _workspace(args)
-    return RetentionPlanner().plan(ws).to_dict()
+    return _call_operation(args, "retention.plan")
 
 
 def _cmd_gc_show(args: argparse.Namespace) -> dict[str, Any]:
-    ws = _workspace(args)
-    return RetentionPlanner().inspect(ws, args.plan_id).to_dict()
+    return _call_operation(args, "retention.show", plan_id=args.plan_id)
 
 
 def _cmd_gc_apply(args: argparse.Namespace) -> dict[str, Any]:
-    ws = _workspace(args)
-    return RetentionPlanner().apply(ws, args.plan_id).to_dict()
+    return _call_operation(args, "retention.apply", plan_id=args.plan_id)
 
 
 def _cmd_phase_begin(args: argparse.Namespace) -> dict[str, Any]:
@@ -1873,11 +1724,11 @@ def _cmd_project_delete(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _cmd_project_rename(args: argparse.Namespace) -> dict[str, Any]:
-    return rename_project(args.home, args.name, args.new_name)
+    return _call_operation(args, "project.rename", name=args.name, new_name=args.new_name)
 
 
 def _cmd_secret_list(args: argparse.Namespace) -> dict[str, Any]:
-    return list_secrets(_workspace(args))
+    return _call_operation(args, "secret.list")
 
 
 def _cmd_secret_set(args: argparse.Namespace) -> dict[str, Any]:
@@ -1885,7 +1736,7 @@ def _cmd_secret_set(args: argparse.Namespace) -> dict[str, Any]:
         msg = "positional secret values are not supported"
         raise ValueError(msg)
     value = sys.stdin.read() if args.value_stdin else getpass.getpass("Secret value: ")
-    return set_secret(_workspace(args), args.name, value)
+    return _call_operation(args, "secret.set", name=args.name, secret_value=value)
 
 
 def _cmd_secret_status(args: argparse.Namespace) -> dict[str, Any]:
@@ -1901,7 +1752,7 @@ def _cmd_secret_status(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _cmd_secret_delete(args: argparse.Namespace) -> dict[str, Any]:
-    return delete_secret(_workspace(args), args.name)
+    return _call_operation(args, "secret.delete", name=args.name)
 
 
 def _harness_for_run(args: argparse.Namespace) -> RunSession:

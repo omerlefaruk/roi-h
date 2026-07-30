@@ -37,6 +37,17 @@ def atomic_write_json(path: Path, value: object, *, mode: int | None = None) -> 
     )
 
 
+def hash_file(path: Path) -> tuple[str, int]:
+    """Hash one file and return its digest and byte count."""
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+            size += len(chunk)
+    return f"sha256:{digest.hexdigest()}", size
+
+
 def package_digest(root: Path, manifest_without_digest: dict[str, Any]) -> str:
     """Hash package content and canonical manifest metadata."""
     digest = hashlib.sha256()

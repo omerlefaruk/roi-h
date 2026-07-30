@@ -44,6 +44,7 @@ def _operation_arguments(args: Namespace, **values: object) -> dict[str, Any]:
         "home": getattr(args, "home", None),
         "project": getattr(args, "project", None),
         "environment": getattr(args, "env", None),
+        "db": getattr(args, "db", None),
         "skills": getattr(args, "skills", None),
         **values,
     }

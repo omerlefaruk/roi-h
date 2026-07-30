@@ -511,11 +511,3 @@ def _normalize_field(label: str) -> str:
         "labelphonenumber": "labelPhone",
     }
     return mapping.get(key, label)
-
-
-def _scripts_import() -> None:
-    import sys
-
-    scripts = Path(__file__).resolve().parent
-    if str(scripts) not in sys.path:
-        sys.path.insert(0, str(scripts))

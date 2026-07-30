@@ -119,16 +119,6 @@ function schemaForTool(schema: JsonObject): TSchema {
 	return copy as TSchema;
 }
 
-function stableJson(value: unknown): string {
-	if (value === null || typeof value !== "object") return JSON.stringify(value);
-	if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-	const object = value as JsonObject;
-	return `{${Object.keys(object)
-		.sort()
-		.map((key) => `${JSON.stringify(key)}:${stableJson(object[key])}`)
-		.join(",")}}`;
-}
-
 function truncate(text: string, limit = MAX_RESULT_CHARS): string {
 	if (text.length <= limit) return text;
 	return `${text.slice(0, limit)}\n\n[ROI-H result truncated; use bounded pagination or an artifact reference.]`;
@@ -360,7 +350,7 @@ export default function roiHBridge(pi: ExtensionAPI) {
 		if (!manifest) throw new Error(`Unknown ROI-H operation: ${operation}`);
 
 		const mergedContext: BridgeContext = { ...state.context, ...requestContext };
-		const stateBefore = stableJson(state);
+		const stateBefore = JSON.stringify(state);
 		let args = { ...argumentsValue };
 		let secretInput: string | undefined;
 		if (operation === SECRET_OPERATION) {
@@ -416,7 +406,7 @@ export default function roiHBridge(pi: ExtensionAPI) {
 			if (responseResult.environment === "dev" || responseResult.environment === "prod") {
 				state.context.environment = responseResult.environment;
 			}
-			if (stableJson(state) !== stateBefore) persistState();
+			if (JSON.stringify(state) !== stateBefore) persistState();
 			const text = responseText(response);
 			onUpdate?.({ content: [{ type: "text", text }], details: responseDetails(response, operation) });
 			return {
@@ -594,7 +584,6 @@ export default function roiHBridge(pi: ExtensionAPI) {
 }
 
 export const __test = {
-	stableJson,
 	truncate,
 	toolName,
 	operationFromToolName,

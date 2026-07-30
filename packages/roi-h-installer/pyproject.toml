@@ -17,11 +17,9 @@ roi-h-installer = "roi_h_installer.cli:main"
 
 [dependency-groups]
 dev = [
-  "build==1.5.0",
   "mypy==2.3.0",
   "pytest==9.1.1",
   "ruff==0.16.0",
-  "twine==7.0.0",
 ]
 
 [tool.hatch.build.targets.wheel]

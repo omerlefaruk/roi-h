@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
 import sqlite3
 import tempfile
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from roi_h.harness.atomicfs import atomic_write_json
+from roi_h.harness.atomicfs import atomic_write_json, hash_file
 from roi_h.harness.lease import RunLease
 from roi_h.harness.workspace import HOME_LAYOUT_VERSION, Workspace
 
@@ -91,33 +90,6 @@ class RestoreResult:
         data = asdict(self)
         data["store"] = self.store.to_dict()
         return data
-
-
-@dataclass(frozen=True)
-class MigrationResult:
-    """Explicit store migration result."""
-
-    ok: bool
-    changed: bool
-    target: str
-    message: str
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass(frozen=True)
-class CompactionResult:
-    """Plan-first compaction result; apply remains disabled until qualified."""
-
-    ok: bool
-    applied: bool
-    enabled: bool
-    policy: dict[str, Any] = field(default_factory=dict)
-    message: str = "compaction is disabled until snapshot and fork-horizon qualification"
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
 
 
 class StoreLifecycle:
@@ -253,7 +225,7 @@ class StoreLifecycle:
                 if integrity != "ok":
                     msg = f"store.integrity_failed: backup: {integrity}"
                     raise RuntimeError(msg)  # noqa: TRY301
-            digest, size = _hash_file(staging)
+            digest, size = hash_file(staging)
             created_at = datetime.now(UTC).isoformat()
             manifest = {
                 "schema_version": 1,
@@ -312,7 +284,7 @@ class StoreLifecycle:
                     sqlite3.connect(previous_path) as previous_store,
                 ):
                     current.backup(previous_store)
-                previous_digest, previous_size = _hash_file(previous_path)
+                previous_digest, previous_size = hash_file(previous_path)
                 atomic_write_json(
                     previous_path.with_name(previous_path.name + ".manifest.json"),
                     {
@@ -354,31 +326,6 @@ class StoreLifecycle:
             previous_backup=previous,
             store=status,
         )
-
-    def migrate(self, workspace: Workspace, target: str = "current") -> MigrationResult:
-        status = self.inspect(workspace)
-        if not status.ok:
-            msg = "store.migration_failed: selected store cannot be opened"
-            raise RuntimeError(msg)
-        return MigrationResult(
-            ok=True,
-            changed=False,
-            target=target,
-            message="ActiveGraph owns schema migration; the selected schema is already openable",
-        )
-
-    def compact(
-        self,
-        workspace: Workspace,
-        policy: dict[str, Any] | None = None,
-        *,
-        apply: bool = False,
-    ) -> CompactionResult:
-        del workspace
-        if apply:
-            msg = "store.migration_failed: compaction apply is disabled until qualification"
-            raise RuntimeError(msg)
-        return CompactionResult(ok=True, applied=False, enabled=False, policy=dict(policy or {}))
 
 
 def _connect_read_only(path: Path) -> sqlite3.Connection:
@@ -439,7 +386,7 @@ def _validate_backup(source: Path, workspace: Workspace) -> None:
     if not isinstance(raw, dict) or raw.get("kind") != "roi-h-activegraph-backup":
         msg = "store.restore_failed: invalid backup manifest"
         raise ValueError(msg)
-    digest, size = _hash_file(source)
+    digest, size = hash_file(source)
     if digest != raw.get("sha256") or size != raw.get("bytes"):
         msg = "store.restore_failed: backup digest mismatch"
         raise ValueError(msg)
@@ -452,19 +399,7 @@ def _validate_backup(source: Path, workspace: Workspace) -> None:
             raise ValueError(msg)
 
 
-def _hash_file(path: Path) -> tuple[str, int]:
-    digest = hashlib.sha256()
-    size = 0
-    with path.open("rb") as stream:
-        while chunk := stream.read(1024 * 1024):
-            digest.update(chunk)
-            size += len(chunk)
-    return f"sha256:{digest.hexdigest()}", size
-
-
 __all__ = [
-    "CompactionResult",
-    "MigrationResult",
     "RestoreResult",
     "StoreBackup",
     "StoreCheck",

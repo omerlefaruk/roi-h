@@ -74,10 +74,6 @@ from roi_h.agent.workflow_operations import (
     skill_delete_apply,
     skill_delete_plan,
     skill_promote,
-    store_compact_apply,
-    store_compact_plan,
-    store_migrate_apply,
-    store_migrate_plan,
     store_restore_apply,
     store_restore_plan,
     support_bundle_create,
@@ -175,6 +171,7 @@ def build_catalog() -> OperationCatalog:
                 pagination=operation_id in {"run.list", "run.events"},
                 properties={
                     "home": {"type": ["string", "null"]},
+                    "db": {"type": ["string", "null"]},
                     "run_id": {"type": ["string", "null"]},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 200},
                     "cursor": {"type": ["string", "null"]},
@@ -184,6 +181,7 @@ def build_catalog() -> OperationCatalog:
         )
     common_properties = {
         "home": {"type": ["string", "null"]},
+        "db": {"type": ["string", "null"]},
         "project": {"type": ["string", "null"]},
         "environment": {"enum": ["dev", "prod", None]},
         "run_id": {"type": ["string", "null"]},
@@ -376,6 +374,7 @@ def build_catalog() -> OperationCatalog:
             _system_context,
             properties={
                 "home": {"type": ["string", "null"]},
+                "db": {"type": ["string", "null"]},
                 "project": {"type": ["string", "null"]},
                 "environment": {"enum": ["dev", "prod", None]},
             },
@@ -655,38 +654,6 @@ def build_catalog() -> OperationCatalog:
             "required",
         ),
         (
-            "store.migrate.plan",
-            "Plan a store migration.",
-            store_migrate_plan,
-            Effect.WRITE,
-            Idempotency.NOT_APPLICABLE,
-            "creates_plan",
-        ),
-        (
-            "store.migrate.apply",
-            "Apply a reviewed store migration.",
-            store_migrate_apply,
-            Effect.DESTRUCTIVE,
-            Idempotency.REQUIRED,
-            "required",
-        ),
-        (
-            "store.compact.plan",
-            "Plan store compaction.",
-            store_compact_plan,
-            Effect.WRITE,
-            Idempotency.NOT_APPLICABLE,
-            "creates_plan",
-        ),
-        (
-            "store.compact.apply",
-            "Apply reviewed store compaction.",
-            store_compact_apply,
-            Effect.DESTRUCTIVE,
-            Idempotency.REQUIRED,
-            "required",
-        ),
-        (
             "support_bundle.create",
             "Create one bounded redacted support bundle.",
             support_bundle_create,
@@ -742,7 +709,6 @@ def _operation(  # noqa: PLR0913 - Descriptor fields stay explicit at registrati
     pagination: bool = False,
     properties: dict[str, Any] | None = None,
     secret_input_paths: list[str] | None = None,
-    execution_mode: ExecutionMode = ExecutionMode.SYNC,
 ) -> OperationDefinition:
     return OperationDefinition(
         manifest=OperationManifest(
@@ -758,12 +724,10 @@ def _operation(  # noqa: PLR0913 - Descriptor fields stay explicit at registrati
             filesystem_requirements=[],
             network_requirements=[],
             pagination=pagination,
-            execution_mode=(
-                ExecutionMode.TASK if operation_id == "store.backup" else execution_mode
-            ),
-            timeout_seconds=3600
-            if operation_id == "store.backup" or execution_mode is ExecutionMode.TASK
-            else 30,
+            execution_mode=ExecutionMode.TASK
+            if operation_id == "store.backup"
+            else ExecutionMode.SYNC,
+            timeout_seconds=3600 if operation_id == "store.backup" else 30,
         ),
         handler=handler,
     )
@@ -793,6 +757,7 @@ def _system_context(request: CommandRequest) -> dict[str, Any]:
         arguments.get("home"),
         project=arguments.get("project"),
         env=arguments.get("environment"),
+        db=arguments.get("db"),
     )
     recent_runs: list[dict[str, Any]] = []
     pending_approvals: list[dict[str, Any]] = []

@@ -585,7 +585,7 @@ def _registered_artifacts(
             (
                 candidate.resolve()
                 for candidate in candidates
-                if candidate.is_file() and _is_relative_to(candidate.resolve(), root)
+                if candidate.is_file() and candidate.resolve().is_relative_to(root)
             ),
             None,
         )
@@ -776,14 +776,6 @@ def _display_name(value: str) -> str:
     return value.replace("-", " ").replace("_", " ").strip().capitalize()
 
 
-def _parse_object(value: str) -> dict[str, Any]:
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
 def _read_json(path: Path) -> dict[str, Any]:
     if not path.is_file():
         return {}
@@ -792,14 +784,6 @@ def _read_json(path: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return value if isinstance(value, dict) else {}
-
-
-def _is_relative_to(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-    except ValueError:
-        return False
-    return True
 
 
 def _json_value(value: object) -> object:

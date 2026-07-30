@@ -388,32 +388,6 @@ def _list_skill_names(project_skills: Path) -> list[str]:
     )
 
 
-def _replace_tree(source: Path, target: Path) -> None:
-    """Replace a directory while retaining a rollback copy until commit."""
-    target.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix=f".{target.name}.new.", dir=target.parent))
-    backup = target.parent / f".{target.name}.previous"
-    shutil.rmtree(staging)
-    shutil.copytree(source, staging)
-    if backup.exists():
-        shutil.rmtree(backup)
-    moved_old = False
-    try:
-        if target.exists():
-            target.replace(backup)
-            moved_old = True
-        staging.replace(target)
-    except Exception:
-        if moved_old and backup.exists() and not target.exists():
-            backup.replace(target)
-        raise
-    finally:
-        if staging.exists():
-            shutil.rmtree(staging)
-        if backup.exists():
-            shutil.rmtree(backup)
-
-
 def _read_latest(name_dir: Path) -> str | None:
     latest = name_dir / "LATEST"
     if not latest.is_file():

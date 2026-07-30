@@ -380,6 +380,7 @@ def _workspace(request: CommandRequest) -> Workspace:
         request.arguments.get("home"),
         project=request.context.project or request.arguments.get("project"),
         env=request.context.environment or request.arguments.get("environment"),
+        db=request.arguments.get("db"),
     )
 
 
