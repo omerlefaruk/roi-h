@@ -590,6 +590,8 @@ def _worker_environment(
     paths = RunStorage(workspace).prepare(run_id)
     env = isolated_process_environment()
     browser_environment = {
+        "PLAYWRIGHT_BROWSERS_PATH",
+        "PLAYWRIGHT_SKIP_BROWSER_GC",
         "ROI_H_BROWSER",
         "ROI_H_BROWSER_HEADED",
         "ROI_H_BROWSER_SLOW_MO",

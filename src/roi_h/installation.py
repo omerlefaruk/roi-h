@@ -10,6 +10,9 @@ from importlib import metadata, resources
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
+from playwright.sync_api import Error as PlaywrightError
+from playwright.sync_api import sync_playwright
+
 from roi_h.harness.runtime_environment import inspect_isolated_runtime_bootstrap
 
 if TYPE_CHECKING:
@@ -18,6 +21,8 @@ if TYPE_CHECKING:
 SCHEMA_VERSION: Literal[1] = 1
 SUPPORTED_PYTHON = (3, 12)
 BUILT_IN_SKILLS = ("browser", "excel", "feedback", "files", "http", "pdf", "shell")
+_WINDOWS = os.name == "nt"
+_PROTOCOL_RESULT = 2
 
 type HealthStatus = Literal["pass", "fail", "pending"]
 type ManagedInstallState = Literal["managed", "unmanaged", "invalid"]
@@ -43,6 +48,18 @@ def default_install_root() -> Path:
     if xdg_data_home:
         return (Path(xdg_data_home).expanduser() / "roi-h").resolve()
     return (Path.home() / ".local" / "share" / "roi-h").resolve()
+
+
+def managed_browser_root(install_root: Path | None = None) -> Path:
+    """Return the one managed Playwright browser root without creating it."""
+    configured = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    if _WINDOWS:
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            return (Path(local_app_data).expanduser() / "ROI-H" / "Browsers").resolve()
+    return ((install_root or default_install_root()) / "browsers").resolve()
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,7 +139,7 @@ def inspect_installation_health(
     data_home_access = _inspect_data_home(data_home)
     managed_state, managed_details = _inspect_managed_install(install_root)
     browser_check = _inspect_browser(
-        install_root,
+        managed_browser_root(install_root),
         managed_state,
         managed_details,
     )
@@ -273,7 +290,7 @@ def _inspect_managed_install(
 
 
 def _inspect_browser(
-    install_root: Path,
+    browser_root: Path,
     managed_state: ManagedInstallState,
     managed_details: dict[str, JsonValue],
 ) -> HealthCheck:
@@ -292,7 +309,7 @@ def _inspect_browser(
             message="The managed installation has no browser revision.",
             details={"reason": "revision_not_recorded"},
         )
-    revision_root = install_root / "browsers" / revision
+    revision_root = browser_root / revision
     if not revision_root.is_dir():
         return HealthCheck(
             code="browser.launch",
@@ -300,12 +317,53 @@ def _inspect_browser(
             message="The required browser revision is not installed.",
             details={"reason": "revision_missing", "revision": revision},
         )
+    try:
+        details = _probe_browser(browser_root, revision_root)
+    except (OSError, RuntimeError, PlaywrightError) as exc:
+        return HealthCheck(
+            code="browser.launch",
+            status="fail",
+            message="The required browser could not complete a launch check.",
+            details={
+                "reason": "launch_failed",
+                "revision": revision,
+                "error": f"{type(exc).__name__}: {exc}",
+            },
+        )
     return HealthCheck(
         code="browser.launch",
         status="pass",
-        message="The required browser revision is installed.",
-        details={"revision": revision},
+        message="The required browser completed a launch check.",
+        details={"revision": revision, **details},
     )
+
+
+def _probe_browser(browser_root: Path, revision_root: Path) -> dict[str, JsonValue]:
+    previous_root = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(browser_root)
+    try:
+        with sync_playwright() as playwright:
+            executable = Path(playwright.chromium.executable_path).resolve()
+            if not executable.is_relative_to(revision_root.resolve()):
+                msg = "Playwright selected a browser outside the required revision."
+                raise RuntimeError(msg)
+            with playwright.chromium.launch(headless=True) as browser:
+                page = browser.new_page()
+                if page.evaluate("1 + 1") != _PROTOCOL_RESULT:
+                    msg = "The browser protocol check returned an unexpected result."
+                    raise RuntimeError(msg)
+                browser_version = browser.version
+    finally:
+        if previous_root is None:
+            os.environ.pop("PLAYWRIGHT_BROWSERS_PATH", None)
+        else:
+            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = previous_root
+    return {
+        "browser_root": str(browser_root),
+        "executable": str(executable),
+        "browser_version": browser_version,
+        "playwright_version": metadata.version("playwright"),
+    }
 
 
 def _data_home_message(access: DataHomeAccess) -> str:
