@@ -20,10 +20,15 @@ function Stop-Install {
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
     Stop-Install "This bootstrap requires Windows."
 }
-$operatingSystemArchitecture = (
-    [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+$operatingSystemArchitecture = [Environment]::GetEnvironmentVariable(
+    "PROCESSOR_ARCHITEW6432"
 )
-if ($operatingSystemArchitecture -ne "X64") {
+if ([string]::IsNullOrWhiteSpace($operatingSystemArchitecture)) {
+    $operatingSystemArchitecture = [Environment]::GetEnvironmentVariable(
+        "PROCESSOR_ARCHITECTURE"
+    )
+}
+if ($operatingSystemArchitecture -ne "AMD64") {
     Stop-Install "This release supports Windows x86-64 only."
 }
 
