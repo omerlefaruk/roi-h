@@ -4,19 +4,24 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 import os
 import re
+import subprocess
 import sys
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 from activegraph import Tool
-from pydantic import BaseModel
+from pydantic import BaseModel, RootModel
 
 from roi_h.harness.domain import IdempotencyMode, SkillScope, ToolEffect, ToolInfo
+from roi_h.harness.runtime_environment import isolated_process_environment
+from roi_h.harness.worker import WORKER_PROTOCOL_LIMIT
 from roi_h.harness.workspace import resolve_home
 
 if TYPE_CHECKING:
@@ -39,6 +44,7 @@ _READ_PREFIXES = (
 )
 _DESTRUCTIVE_TOKENS = ("delete", "remove", "drop", "purge", "shell", "run")
 _REQUIRED_SECRET_RE = re.compile(r"""require_secret\(\s*["']([A-Za-z0-9_.-]+)["']""")
+_CUSTOM_INSPECTION_TIMEOUT_SECONDS = 10.0
 
 
 def default_skills_root() -> Path:
@@ -282,7 +288,19 @@ def _load_script_tool(
     scope: SkillScope,
     skills_root: Path,
 ) -> SkillTool:
-    module = _import_script(skill=skill, script_path=script_path)
+    module: object
+    if scope == "global":
+        module = _import_script(skill=skill, script_path=script_path)
+    else:
+        inspection = _inspect_custom_script(script_path, skills_root=skills_root)
+        inspection["Input"] = _inspected_model(
+            inspection.get("Input"), script_path=script_path, name="Input"
+        )
+        inspection["Output"] = _inspected_model(
+            inspection.get("Output"), script_path=script_path, name="Output"
+        )
+        module = SimpleNamespace(**inspection, run=_isolated_run)
+
     tool_id = str(getattr(module, "TOOL_ID", script_path.stem))
     description = str(getattr(module, "DESCRIPTION", f"{skill}.{tool_id}"))
     deterministic = bool(getattr(module, "DETERMINISTIC", False))
@@ -321,7 +339,7 @@ def _load_script_tool(
 
     input_model = getattr(module, "Input", None)
     output_model = getattr(module, "Output", None)
-    run = getattr(module, "run", None)
+    run = cast("Callable[[BaseModel], BaseModel]", getattr(module, "run", None))
     if not (
         isinstance(input_model, type)
         and issubclass(input_model, BaseModel)
@@ -357,7 +375,12 @@ def _load_script_tool(
     )
 
 
-def _tool_effect(module: ModuleType, *, skill: str, tool_id: str) -> ToolEffect:
+def _isolated_run(_arguments: BaseModel) -> BaseModel:
+    msg = "custom skill must run through the isolated skill invoker"
+    raise RuntimeError(msg)
+
+
+def _tool_effect(module: object, *, skill: str, tool_id: str) -> ToolEffect:
     declared = getattr(module, "TOOL_EFFECT", None)
     if declared in {"read", "write", "destructive"}:
         return cast("ToolEffect", declared)
@@ -369,11 +392,93 @@ def _tool_effect(module: ModuleType, *, skill: str, tool_id: str) -> ToolEffect:
     return "write"
 
 
-def _idempotency_mode(module: ModuleType, *, effect: ToolEffect) -> IdempotencyMode:
+def _idempotency_mode(module: object, *, effect: ToolEffect) -> IdempotencyMode:
     declared = getattr(module, "IDEMPOTENCY", None)
     if declared in {"none", "key", "reconcile"}:
         return cast("IdempotencyMode", declared)
     return "none" if effect == "read" else "reconcile"
+
+
+def _inspect_custom_script(
+    script_path: Path,
+    *,
+    skills_root: Path,
+) -> dict[str, object]:
+    resolved = script_path.resolve()
+    root = skills_root.resolve()
+    if not resolved.is_relative_to(root):
+        msg = f"custom skill script escapes its skills root: {script_path}"
+        raise ValueError(msg)
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="roi-h-skill-inspect-") as response_dir:
+            response_path = Path(response_dir) / "response.json"
+            request = json.dumps(
+                {
+                    "action": "inspect",
+                    "script": str(resolved),
+                    "response_path": str(response_path),
+                }
+            )
+            completed = subprocess.run(
+                [sys.executable, "-m", "roi_h.harness.worker"],
+                input=request,
+                text=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                cwd=tempfile.gettempdir(),
+                env=isolated_process_environment(),
+                timeout=_CUSTOM_INSPECTION_TIMEOUT_SECONDS,
+            )
+            if not response_path.is_file():
+                msg = f"isolated skill inspector returned no response (exit={completed.returncode})"
+                raise RuntimeError(msg)
+            with response_path.open(encoding="utf-8") as response_file:
+                payload = response_file.read(WORKER_PROTOCOL_LIMIT + 1)
+    except subprocess.TimeoutExpired as exc:
+        msg = (
+            f"custom skill inspection exceeded {_CUSTOM_INSPECTION_TIMEOUT_SECONDS:g}s: "
+            f"{script_path}"
+        )
+        raise TimeoutError(msg) from exc
+
+    if len(payload) > WORKER_PROTOCOL_LIMIT:
+        msg = f"isolated skill inspector response is too large: {script_path}"
+        raise RuntimeError(msg)
+    try:
+        response = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        msg = f"isolated skill inspector returned invalid JSON: {script_path}"
+        raise RuntimeError(msg) from exc
+    if not response.get("ok"):
+        raise RuntimeError(str(response.get("error") or "isolated skill inspection failed"))
+    inspection = response.get("inspection")
+    if not isinstance(inspection, dict):
+        msg = f"isolated skill inspector returned no metadata for {script_path}"
+        raise TypeError(msg)
+    return {str(key): value for key, value in inspection.items()}
+
+
+def _inspected_model(
+    schema: object,
+    *,
+    script_path: Path,
+    name: str,
+) -> type[BaseModel]:
+    if not isinstance(schema, dict):
+        msg = f"{script_path}: isolated inspector returned an invalid {name} schema"
+        raise TypeError(msg)
+    validated_schema = {str(key): value for key, value in schema.items()}
+
+    class InspectedModel(RootModel[dict[str, object]]):
+        @classmethod
+        def model_json_schema(cls, *args: object, **kwargs: object) -> dict[str, object]:
+            del args, kwargs
+            return validated_schema
+
+    InspectedModel.__name__ = f"Inspected{name}"
+    return InspectedModel
 
 
 def _import_script(*, skill: str, script_path: Path) -> ModuleType:

@@ -12,9 +12,11 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, cast
 
 from activegraph import Behavior, Event, Runtime
@@ -47,6 +49,7 @@ from roi_h.harness.secrets import (
     resolve_secret_refs,
     secret_names_in_refs,
 )
+from roi_h.harness.worker import WORKER_PROTOCOL_LIMIT
 from roi_h.harness.workspace import Workspace
 
 _APPROVAL_BEHAVIOR = "roi_h.request_invocation_approval"
@@ -520,24 +523,38 @@ def _run_worker(
         run_id=run_id,
         idempotency_key=idempotency_key,
     )
-    request = json.dumps({"script": str(skill_tool.script_path), "args": payload})
-    completed = subprocess.run(
-        [sys.executable, "-m", "roi_h.harness.worker"],
-        input=request,
-        text=True,
-        capture_output=True,
-        check=False,
-        cwd=paths.work,
-        env=env,
-        timeout=skill_tool.timeout_seconds,
-    )
-    try:
-        response = json.loads(completed.stdout)
-    except json.JSONDecodeError as exc:
-        msg = (
-            f"isolated worker returned invalid JSON (exit={completed.returncode}): "
-            f"{completed.stderr[-1000:]}"
+    with tempfile.TemporaryDirectory(prefix="worker-", dir=paths.tmp) as response_dir:
+        response_path = Path(response_dir) / "response.json"
+        request = json.dumps(
+            {
+                "script": str(skill_tool.script_path),
+                "args": payload,
+                "response_path": str(response_path),
+            }
         )
+        completed = subprocess.run(
+            [sys.executable, "-m", "roi_h.harness.worker"],
+            input=request,
+            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            cwd=paths.work,
+            env=env,
+            timeout=skill_tool.timeout_seconds,
+        )
+        if not response_path.is_file():
+            msg = f"isolated worker returned no response (exit={completed.returncode})"
+            raise RuntimeError(msg)
+        with response_path.open(encoding="utf-8") as response_file:
+            response_text = response_file.read(WORKER_PROTOCOL_LIMIT + 1)
+    if len(response_text) > WORKER_PROTOCOL_LIMIT:
+        msg = f"isolated worker response is too large: {skill_tool.name}"
+        raise RuntimeError(msg)
+    try:
+        response = json.loads(response_text)
+    except json.JSONDecodeError as exc:
+        msg = f"isolated worker returned invalid JSON (exit={completed.returncode})"
         raise RuntimeError(msg) from exc
     if not response.get("ok"):
         raise RuntimeError(str(response.get("error") or "isolated worker failed"))
