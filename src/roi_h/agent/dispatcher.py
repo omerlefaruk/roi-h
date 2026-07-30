@@ -8,7 +8,7 @@ import os
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from jsonschema import Draft202012Validator
+from pydantic import BaseModel, ValidationError
 
 from roi_h.agent.catalog import OperationCatalog, build_catalog
 from roi_h.agent.contract import (
@@ -22,6 +22,7 @@ from roi_h.harness.atomicfs import atomic_write_json
 from roi_h.harness.workspace import resolve_home
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
 
@@ -65,7 +66,8 @@ class Dispatcher:
         request_id = _request_id(request.request_id)
         request = request.model_copy(update={"request_id": request_id})
         try:
-            manifest = self.catalog.describe(operation_id)[0]
+            definition = self.catalog.definition(operation_id)
+            manifest = definition.manifest
             if manifest.idempotency.value == "required" and not request.idempotency_key:
                 return _failure(
                     operation_id,
@@ -74,10 +76,10 @@ class Dispatcher:
                     "invalid_request",
                     "idempotency_key is required for this operation",
                 )
-            invalid_input = _schema_failure(
+            invalid_input = _model_failure(
                 operation_id,
                 request_id,
-                manifest.input_schema,
+                definition.input_model,
                 request.arguments,
                 code="request.invalid",
                 category="invalid_request",
@@ -124,10 +126,10 @@ class Dispatcher:
                     retry_after_ms=500,
                 )
             result = self.catalog.execute(operation_id, request)
-            invalid_output = _schema_failure(
+            invalid_output = _model_failure(
                 operation_id,
                 request_id,
-                manifest.output_schema,
+                definition.output_model,
                 result,
                 code="operation.contract_violation",
                 category="internal",
@@ -224,36 +226,66 @@ def _failure(  # noqa: PLR0913 - error contract fields stay explicit.
     )
 
 
-def _schema_failure(  # noqa: PLR0913 - schema context fields stay explicit.
+def _model_failure(  # noqa: PLR0913 - model context fields stay explicit.
     operation_id: str,
     request_id: str,
-    schema: dict[str, Any],
+    model: type[BaseModel],
     value: object,
     *,
     code: str,
     category: str,
     root: str,
 ) -> CommandResult | None:
-    errors = sorted(
-        Draft202012Validator(schema).iter_errors(value),
-        key=lambda item: [str(part) for part in item.absolute_path],
-    )
-    if not errors:
-        return None
-    error = errors[0]
-    suffix = ".".join(str(part) for part in error.absolute_path)
-    path = f"{root}.{suffix}" if suffix else root
-    return _failure(
-        operation_id,
-        request_id,
-        code,
-        category,
-        error.message,
-        details={
-            "path": path,
-            "validator": str(error.validator),
-        },
-    )
+    try:
+        model.model_validate(value)
+    except ValidationError as exc:
+        errors = sorted(
+            exc.errors(include_url=False, include_context=False, include_input=False),
+            key=_error_location,
+        )
+        error = errors[0]
+        location = _error_location(error)
+        suffix = ".".join(location)
+        path = f"{root}.{suffix}" if suffix else root
+        error_type = str(error["type"])
+        validator = (
+            _literal_validator(model, location)
+            if error_type == "literal_error"
+            else {
+                "extra_forbidden": "additionalProperties",
+                "greater_than_equal": "minimum",
+                "less_than_equal": "maximum",
+                "missing": "required",
+                "value_error": "anyOf",
+            }.get(error_type, "type" if error_type.endswith("_type") else error_type)
+        )
+        return _failure(
+            operation_id,
+            request_id,
+            code,
+            category,
+            str(error["msg"]),
+            details={"path": path, "validator": validator},
+        )
+    return None
+
+
+def _literal_validator(model: type[BaseModel], location: list[str]) -> str:
+    schema: object = model.model_json_schema()
+    for part in location:
+        if not isinstance(schema, dict):
+            break
+        properties = schema.get("properties")
+        schema = properties.get(part, {}) if isinstance(properties, dict) else {}
+    return "const" if isinstance(schema, dict) and "const" in schema else "enum"
+
+
+def _error_location(error: Mapping[str, object]) -> list[str]:
+    raw_location = error.get("loc", ())
+    location = [str(part) for part in raw_location] if isinstance(raw_location, tuple) else []
+    if error.get("type") in {"extra_forbidden", "missing"}:
+        return location[:-1]
+    return location
 
 
 def _request_id(value: str | None) -> str:
