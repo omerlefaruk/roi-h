@@ -16,8 +16,6 @@ from activegraph import Graph, Object, Runtime
 from roi_h.harness import graph_access, invoke_ops, phase_machine
 from roi_h.harness import reconcile as reconcile_ops
 from roi_h.harness.activegraph_runtime import ROIHRuntime
-from roi_h.harness.adaptive import build_adaptive_behavior, run_adaptive
-from roi_h.harness.codex_provider import CodexCLIProvider
 from roi_h.harness.control import request_cancellation
 from roi_h.harness.custom import promote_advice
 from roi_h.harness.domain import (
@@ -95,18 +93,13 @@ class RunSession:
         graph = Graph(run_id=run_id)
         RunStorage(workspace).prepare(graph.run_id)
         invoker = IsolatedSkillInvoker(catalog, workspace)
-        behaviors = (
-            *build_invocation_behaviors(catalog, workspace, invoker),
-            build_adaptive_behavior(),
-        )
+        behaviors = build_invocation_behaviors(catalog, workspace, invoker)
         runtime = ROIHRuntime(
             graph,
             persist_to=str(workspace.db),
             behaviors=behaviors,
             tools=tools,
             budget=limits,
-            llm_provider=CodexCLIProvider(workspace.project_root),
-            native_structured_output=True,
         )
         runtime.run_until_idle()
         return cls(
@@ -143,18 +136,13 @@ class RunSession:
         tools = catalog.to_activegraph_tools()
         limits = spec.to_activegraph_limits() or None
         invoker = IsolatedSkillInvoker(catalog, workspace)
-        behaviors = (
-            *build_invocation_behaviors(catalog, workspace, invoker),
-            build_adaptive_behavior(),
-        )
+        behaviors = build_invocation_behaviors(catalog, workspace, invoker)
         runtime = ROIHRuntime.load(
             str(workspace.db),
             run_id=run_id,
             behaviors=behaviors,
             tools=tools,
             budget=limits,
-            llm_provider=CodexCLIProvider(workspace.project_root),
-            native_structured_output=True,
         )
         recover_incomplete_invocations(runtime)
         runtime.restore_rejections()
@@ -170,23 +158,6 @@ class RunSession:
     def list_tools(self) -> list[ToolInfo]:
         """Return the AI-facing tool catalog derived from skills scripts."""
         return self.catalog.list_tools()
-
-    def adapt(
-        self,
-        goal: str,
-        *,
-        tools: Sequence[str],
-        max_turns: int = 6,
-        actor: str = "codex",
-    ) -> dict[str, Any]:
-        """Run a bounded Codex-guided development loop through durable invocations."""
-        return run_adaptive(
-            self,
-            goal,
-            tools=tools,
-            max_turns=max_turns,
-            actor=actor,
-        )
 
     def start_run(
         self,
@@ -396,10 +367,6 @@ class RunSession:
             {"id": item.id, "data": dict(item.data)}
             for item in self.runtime.graph.objects(type="rpa.invocation")
         ]
-        adaptive_sessions = [
-            {"id": item.id, "data": dict(item.data)}
-            for item in self.runtime.graph.objects(type="rpa.adaptive.session")
-        ]
         runtime_status = self.runtime.status()
         advice = promote_advice(self.catalog, steps)
         budget_snap = None
@@ -444,8 +411,6 @@ class RunSession:
             "pending_approvals": len(pending),
             "invocations": invocations,
             "invocation_count": len(invocations),
-            "adaptive_sessions": adaptive_sessions,
-            "adaptive_session_count": len(adaptive_sessions),
             "outcome_unknown_invocations": sum(
                 1 for item in invocations if item["data"].get("status") == "outcome_unknown"
             ),

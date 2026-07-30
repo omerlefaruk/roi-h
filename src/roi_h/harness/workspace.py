@@ -102,8 +102,9 @@ class Workspace:
             raise ValueError(msg)
 
         active_env = _resolve_env(env, home_config_path, project_name)
+        for env_name in sorted(_VALID_ENVS):
+            _ensure_environment_roots(project_root / "environments" / env_name, env_name)
         environment_root = project_root / "environments" / active_env
-        _ensure_environment_roots(environment_root, active_env)
         environment_config_path = environment_root / "environment.json"
 
         db_path = (
@@ -534,24 +535,29 @@ def _ensure_environment_roots(root: Path, env: str) -> None:
     ):
         (root / relative).mkdir(parents=True, exist_ok=True, mode=0o700)
     manifest = root / "environment.json"
-    if not manifest.exists():
-        atomic_write_json(
-            manifest,
-            {
-                "schema_version": ENVIRONMENT_SCHEMA_VERSION,
-                "name": env,
-                "store": {
-                    "adapter": "activegraph-sqlite",
-                    "durability": "full" if env == "prod" else "normal",
-                    "busy_timeout_ms": 10_000,
-                },
-                "execution": {
-                    "allow_adaptive": env == "dev",
-                    "allow_ambient_project_skills": env == "dev",
-                },
+    if manifest.exists():
+        config = _read_config(manifest)
+        execution = config.get("execution")
+        if isinstance(execution, dict) and "allow_adaptive" in execution:
+            del execution["allow_adaptive"]
+            atomic_write_json(manifest, config, mode=0o600)
+        return
+    atomic_write_json(
+        manifest,
+        {
+            "schema_version": ENVIRONMENT_SCHEMA_VERSION,
+            "name": env,
+            "store": {
+                "adapter": "activegraph-sqlite",
+                "durability": "full" if env == "prod" else "normal",
+                "busy_timeout_ms": 10_000,
             },
-            mode=0o600,
-        )
+            "execution": {
+                "allow_ambient_project_skills": env == "dev",
+            },
+        },
+        mode=0o600,
+    )
 
 
 def _assert_supported_home(path: Path) -> None:
