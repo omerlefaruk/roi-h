@@ -57,6 +57,15 @@ class ToolPolicyError(RuntimeError):
     """Raised when an invocation violates the published execution policy."""
 
 
+class SkillWorkerError(RuntimeError):
+    """Raised with the isolated worker stage that failed."""
+
+    def __init__(self, message: str, *, stage: str) -> None:
+        """Store the failed worker stage."""
+        super().__init__(message)
+        self.stage = stage
+
+
 class IsolatedSkillInvoker:
     """ActiveGraph tool-invoker adapter backed by ROI-H skill subprocesses."""
 
@@ -107,6 +116,15 @@ class IsolatedSkillInvoker:
                 code,
                 message,
                 payload_extras={"tool": skill_tool.name},
+            ) from exc
+        except SkillWorkerError as exc:
+            reason = "tool.invalid_output" if exc.stage == "output" else "tool.invalid_input"
+            if exc.stage not in {"contract", "input", "output"}:
+                reason = "tool.execution_error"
+            raise ToolError(
+                reason,
+                str(exc),
+                payload_extras={"tool": skill_tool.name, "stage": exc.stage},
             ) from exc
         except ToolError:
             raise
@@ -520,7 +538,17 @@ def _run_worker(
         run_id=run_id,
         idempotency_key=idempotency_key,
     )
-    request = json.dumps({"script": str(skill_tool.script_path), "args": payload})
+    request = json.dumps(
+        {
+            "operation": "invoke",
+            "script": str(skill_tool.script_path),
+            "skill_root": str(skill_tool.script_path.parent.parent),
+            "expected_sha256": skill_tool.script_sha256,
+            "expected_tree_sha256": skill_tool.skill_tree_sha256,
+            "reject_bytecode": skill_tool.reject_bytecode,
+            "args": payload,
+        }
+    )
     completed = subprocess.run(
         [sys.executable, "-m", "roi_h.harness.worker"],
         input=request,
@@ -540,7 +568,10 @@ def _run_worker(
         )
         raise RuntimeError(msg) from exc
     if not response.get("ok"):
-        raise RuntimeError(str(response.get("error") or "isolated worker failed"))
+        raise SkillWorkerError(
+            str(response.get("error") or "isolated worker failed"),
+            stage=str(response.get("stage") or "unknown"),
+        )
     output = response.get("output")
     if not isinstance(output, dict):
         msg = f"{skill_tool.name} output must be an object"
@@ -702,6 +733,8 @@ def _failure_from_exception(exc: Exception) -> ExecutionFailure:
         )
     if isinstance(exc, ToolPolicyError):
         kind = "approval"
+    elif isinstance(exc, SkillWorkerError):
+        kind = "validation" if exc.stage in {"contract", "input", "output"} else "internal"
     elif isinstance(exc, (TypeError, ValueError, KeyError)):
         kind = "validation"
     elif isinstance(exc, TimeoutError):
@@ -713,6 +746,7 @@ def _failure_from_exception(exc: Exception) -> ExecutionFailure:
         message=f"{type(exc).__name__}: {exc}",
         exception_type=type(exc).__name__,
         retryable=isinstance(exc, TimeoutError),
+        details={"stage": exc.stage} if isinstance(exc, SkillWorkerError) else {},
     )
 
 

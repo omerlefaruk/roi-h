@@ -55,6 +55,7 @@ def test_write_tools_cannot_be_reinvoked_as_deterministic_replay(
             "from pydantic import BaseModel\n"
             "TOOL_ID='create_contact'\n"
             "DESCRIPTION='write probe'\n"
+            "TOOL_EFFECT='write'\n"
             "DETERMINISTIC=True\n"
             "class Input(BaseModel):\n    name: str\n"
             "class Output(BaseModel):\n    name: str\n"
@@ -74,6 +75,47 @@ def test_write_tools_cannot_be_reinvoked_as_deterministic_replay(
     assert tool.deterministic is False
     assert tool.idempotency == "reconcile"
     assert harness.runtime.get_tool("crm.create_contact").deterministic is False
+
+
+def test_skill_mutation_after_inspection_fails_before_import(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    define_project_tool(
+        skill="safe",
+        tool="echo",
+        description="digest probe",
+        project_root=workspace.project_skills,
+        source=(
+            "from pydantic import BaseModel\n"
+            "TOOL_ID='echo'\nTOOL_EFFECT='read'\nIDEMPOTENCY='none'\n"
+            "REQUIRES_APPROVAL=False\nALLOW_IN_PROD=False\n"
+            "TIMEOUT_SECONDS=120.0\nSECRET_NAMES=()\nNETWORK_HOSTS=()\n"
+            "FILESYSTEM_ROOTS=()\n"
+            "class Input(BaseModel):\n    value: str\n"
+            "class Output(BaseModel):\n    value: str\n"
+            "def run(args: Input) -> Output:\n    return Output(value=args.value)\n"
+        ),
+    )
+    harness = RunSession.create(
+        workspace,
+        run_id="skill-mutation",
+        skills_root=default_skills_root(),
+        auto_approve=True,
+    )
+    harness.start_run("reject changed skill code")
+    tool = harness.catalog.resolve("safe", "echo")
+    marker = tmp_path / "mutated-import"
+    tool.script_path.write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('unsafe')\n"
+        + tool.script_path.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    result = harness.invoke("safe", "echo", {"value": "test"})
+
+    assert result.status == "error"
+    assert result.failure is not None
+    assert result.failure.details["stage"] == "integrity"
+    assert not marker.exists()
 
 
 def test_force_does_not_bypass_production_execution_policy(tmp_path: Path) -> None:

@@ -23,8 +23,15 @@ from pydantic import BaseModel, Field
 
 TOOL_ID = "{tool_id}"
 DESCRIPTION = {description!r}
-DETERMINISTIC = True
-REQUIRES_APPROVAL = False
+DETERMINISTIC = False
+TOOL_EFFECT = "write"
+IDEMPOTENCY = "reconcile"
+REQUIRES_APPROVAL = True
+ALLOW_IN_PROD = False
+TIMEOUT_SECONDS = 120.0
+SECRET_NAMES = ()
+NETWORK_HOSTS = ()
+FILESYSTEM_ROOTS = ()
 
 
 class Input(BaseModel):
@@ -104,8 +111,8 @@ def define_project_tool(
         "script_path": str(script_path),
         "skill_md": str(skill_dir / "SKILL.md"),
         "project_root": str(root),
-        "input_schema": loaded.input_model.model_json_schema(),
-        "output_schema": loaded.output_model.model_json_schema(),
+        "input_schema": loaded.input_schema,
+        "output_schema": loaded.output_schema,
     }
 
 

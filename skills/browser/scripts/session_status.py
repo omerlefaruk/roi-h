@@ -3,8 +3,17 @@ from __future__ import annotations
 from pydantic import BaseModel
 TOOL_ID = "session_status"
 DESCRIPTION = "Report whether the shared Chromium CDP session is alive."
-DETERMINISTIC = True
+DETERMINISTIC = False
 REQUIRES_APPROVAL = False
+TOOL_EFFECT = 'read'
+IDEMPOTENCY = 'none'
+ALLOW_IN_PROD = True
+TIMEOUT_SECONDS = 180.0
+SECRET_NAMES = ()
+NETWORK_HOSTS = ('*',)
+FILESYSTEM_ROOTS = ()
+
+
 class Input(BaseModel):
     pass
 class Output(BaseModel):

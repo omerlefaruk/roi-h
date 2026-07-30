@@ -1,7 +1,5 @@
 ---
 name: shell
-description: Run a shell command (always requires approval). Last resort.
+description: Use a shell command only when no narrower tool can do the work.
 version: 0.1.0
 ---
-# shell
-Tool: `run` — always REQUIRES_APPROVAL.

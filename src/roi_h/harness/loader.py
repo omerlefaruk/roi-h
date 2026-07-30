@@ -4,19 +4,24 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 import os
-import re
+import shutil
+import subprocess
 import sys
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any
 
 from activegraph import Tool
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from roi_h.harness.domain import IdempotencyMode, SkillScope, ToolEffect, ToolInfo
+from roi_h.harness.runtime_environment import isolated_process_environment
+from roi_h.harness.skill_contract import SkillInspection, inspect_module, skill_tree_digest
 from roi_h.harness.workspace import resolve_home
 
 if TYPE_CHECKING:
@@ -24,21 +29,17 @@ if TYPE_CHECKING:
 
 _SCRIPT_GLOBALS_PREFIX = "roi_h_skill_"
 _SKILL_NAME_RE_OK = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
-_READ_PREFIXES = (
-    "find",
-    "get",
-    "list",
-    "read",
-    "hash",
-    "snapshot",
-    "status",
-    "schema",
-    "score",
-    "verify",
-    "extract",
-)
-_DESTRUCTIVE_TOKENS = ("delete", "remove", "drop", "purge", "shell", "run")
-_REQUIRED_SECRET_RE = re.compile(r"""require_secret\(\s*["']([A-Za-z0-9_.-]+)["']""")
+_INSPECTION_TIMEOUT_SECONDS = 10.0
+
+
+class _IsolatedInput(BaseModel):
+    """Parent-owned object adapter; the worker performs exact validation."""
+
+    model_config = ConfigDict(extra="allow", strict=True)
+
+
+class _IsolatedOutput(_IsolatedInput):
+    pass
 
 
 def default_skills_root() -> Path:
@@ -105,10 +106,15 @@ class SkillTool:
     network_hosts: tuple[str, ...]
     filesystem_roots: tuple[str, ...]
     script_path: Path
+    script_sha256: str
+    skill_tree_sha256: str
+    reject_bytecode: bool
     skills_root: Path
     input_model: type[BaseModel]
     output_model: type[BaseModel]
-    run: Callable[[BaseModel], BaseModel]
+    input_schema: dict[str, Any]
+    output_schema: dict[str, Any]
+    run: Callable[[BaseModel], BaseModel] | None
 
     @property
     def name(self) -> str:
@@ -133,8 +139,8 @@ class SkillTool:
             network_hosts=list(self.network_hosts),
             filesystem_roots=list(self.filesystem_roots),
             script_path=str(self.script_path),
-            input_schema=self.input_model.model_json_schema(),
-            output_schema=self.output_model.model_json_schema(),
+            input_schema=self.input_schema,
+            output_schema=self.output_schema,
         )
 
     def to_activegraph_tool(self) -> Tool:
@@ -145,6 +151,9 @@ class SkillTool:
 
         def _fn(arguments: BaseModel, context: ToolContext) -> BaseModel:
             del context
+            if run is None:
+                msg = "custom skill tools execute only through the isolated ROI-H invoker"
+                raise RuntimeError(msg)
             if not isinstance(arguments, input_model):
                 arguments = input_model.model_validate(
                     arguments.model_dump() if isinstance(arguments, BaseModel) else arguments
@@ -282,98 +291,132 @@ def _load_script_tool(
     scope: SkillScope,
     skills_root: Path,
 ) -> SkillTool:
-    module = _import_script(skill=skill, script_path=script_path)
-    tool_id = str(getattr(module, "TOOL_ID", script_path.stem))
-    description = str(getattr(module, "DESCRIPTION", f"{skill}.{tool_id}"))
-    deterministic = bool(getattr(module, "DETERMINISTIC", False))
-    requires_approval = bool(getattr(module, "REQUIRES_APPROVAL", False))
-    effect = _tool_effect(module, skill=skill, tool_id=tool_id)
-    if effect != "read":
-        # ActiveGraph's deterministic flag means replay may re-invoke.
-        # External writes must never inherit that behavior accidentally.
-        deterministic = False
-    idempotency = _idempotency_mode(module, effect=effect)
-    allow_in_prod = bool(
-        getattr(module, "ALLOW_IN_PROD", effect != "destructive" and skill != "shell")
-    )
-    timeout_seconds = float(
-        getattr(
+    resolved = script_path.resolve()
+    script_sha256 = hashlib.sha256(resolved.read_bytes()).hexdigest()
+    skill_root = resolved.parent.parent
+    trusted_source = _trusted_source(resolved)
+    reject_bytecode = trusted_source is None
+    tree_sha256 = skill_tree_digest(skill_root, reject_bytecode=reject_bytecode)
+    source = resolved.read_text(encoding="utf-8")
+    if trusted_source is not None:
+        module = _import_script(skill=skill, script_path=trusted_source)
+        inspection = inspect_module(
             module,
-            "TIMEOUT_SECONDS",
-            3600.0 if skill == "shell" else 180.0 if skill == "browser" else 120.0,
+            skill=skill,
+            default_tool_id=resolved.stem,
+            source=source,
+            trusted=True,
         )
-    )
-    if timeout_seconds <= 0:
-        msg = f"{script_path}: TIMEOUT_SECONDS must be > 0"
-        raise ValueError(msg)
-    source = script_path.read_text(encoding="utf-8")
-    declared_secrets = getattr(module, "SECRET_NAMES", ())
-    secret_names = tuple(
-        sorted(
-            {
-                *(str(item) for item in declared_secrets),
-                *_REQUIRED_SECRET_RE.findall(source),
-            }
+        input_model = module.Input
+        output_model = module.Output
+        run = module.run
+    else:
+        inspection = _inspect_script(
+            resolved,
+            skill=skill,
+            expected_sha256=script_sha256,
+            expected_tree_sha256=tree_sha256,
+            reject_bytecode=reject_bytecode,
         )
-    )
-    network_hosts = tuple(str(item) for item in getattr(module, "NETWORK_HOSTS", ()))
-    filesystem_roots = tuple(str(item) for item in getattr(module, "FILESYSTEM_ROOTS", ()))
+        input_model = _IsolatedInput
+        output_model = _IsolatedOutput
+        run = None
 
-    input_model = getattr(module, "Input", None)
-    output_model = getattr(module, "Output", None)
-    run = getattr(module, "run", None)
-    if not (
-        isinstance(input_model, type)
-        and issubclass(input_model, BaseModel)
-        and isinstance(output_model, type)
-        and issubclass(output_model, BaseModel)
-        and callable(run)
-    ):
-        msg = (
-            f"{script_path} must define Input(BaseModel), Output(BaseModel), "
-            "and run(args: Input) -> Output"
-        )
-        raise TypeError(msg)
-
+    tool_id = validate_skill_token(inspection.tool_id, kind="tool")
     return SkillTool(
         skill=skill,
         tool_id=tool_id,
-        description=description,
+        description=inspection.description,
         scope=scope,
-        requires_approval=requires_approval,
-        deterministic=deterministic,
-        effect=effect,
-        idempotency=idempotency,
-        allow_in_prod=allow_in_prod,
-        timeout_seconds=timeout_seconds,
-        secret_names=secret_names,
-        network_hosts=network_hosts,
-        filesystem_roots=filesystem_roots,
-        script_path=script_path.resolve(),
+        requires_approval=inspection.requires_approval,
+        deterministic=inspection.deterministic,
+        effect=inspection.effect,
+        idempotency=inspection.idempotency,
+        allow_in_prod=inspection.allow_in_prod,
+        timeout_seconds=inspection.timeout_seconds,
+        secret_names=inspection.secret_names,
+        network_hosts=inspection.network_hosts,
+        filesystem_roots=inspection.filesystem_roots,
+        script_path=resolved,
+        script_sha256=script_sha256,
+        skill_tree_sha256=tree_sha256,
+        reject_bytecode=reject_bytecode,
         skills_root=skills_root.resolve(),
         input_model=input_model,
         output_model=output_model,
+        input_schema=inspection.input_schema,
+        output_schema=inspection.output_schema,
         run=run,
     )
 
 
-def _tool_effect(module: ModuleType, *, skill: str, tool_id: str) -> ToolEffect:
-    declared = getattr(module, "TOOL_EFFECT", None)
-    if declared in {"read", "write", "destructive"}:
-        return cast("ToolEffect", declared)
-    lowered = f"{skill}.{tool_id}".lower()
-    if skill == "shell" or any(token in lowered for token in _DESTRUCTIVE_TOKENS):
-        return "destructive"
-    if tool_id.lower().startswith(_READ_PREFIXES):
-        return "read"
-    return "write"
+def _trusted_source(script_path: Path) -> Path | None:
+    return script_path if script_path.is_relative_to(default_skills_root().resolve()) else None
 
 
-def _idempotency_mode(module: ModuleType, *, effect: ToolEffect) -> IdempotencyMode:
-    declared = getattr(module, "IDEMPOTENCY", None)
-    if declared in {"none", "key", "reconcile"}:
-        return cast("IdempotencyMode", declared)
-    return "none" if effect == "read" else "reconcile"
+def _inspect_script(
+    script_path: Path,
+    *,
+    skill: str,
+    expected_sha256: str,
+    expected_tree_sha256: str,
+    reject_bytecode: bool,
+) -> SkillInspection:
+    try:
+        with tempfile.TemporaryDirectory(prefix="roi-h-inspection-") as temporary:
+            temporary_path = Path(temporary).resolve()
+            request = json.dumps(
+                {
+                    "operation": "inspect",
+                    "script": str(script_path),
+                    "skill_root": str(script_path.parent.parent),
+                    "expected_sha256": expected_sha256,
+                    "expected_tree_sha256": expected_tree_sha256,
+                    "reject_bytecode": reject_bytecode,
+                    "temporary": str(temporary_path),
+                    "skill": skill,
+                }
+            )
+            completed = subprocess.run(  # noqa: S603 - fixed interpreter and sandbox
+                _inspection_command(temporary_path),
+                input=request,
+                text=True,
+                capture_output=True,
+                check=False,
+                cwd=Path(sys.executable).resolve().parent,
+                env=isolated_process_environment(),
+                timeout=_INSPECTION_TIMEOUT_SECONDS,
+            )
+    except subprocess.TimeoutExpired as exc:
+        msg = f"skill inspection exceeded {_INSPECTION_TIMEOUT_SECONDS:g}s: {script_path}"
+        raise TimeoutError(msg) from exc
+    try:
+        response = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        detail = (completed.stderr or completed.stdout)[-1000:]
+        msg = f"skill inspection returned invalid JSON: {script_path}: {detail}"
+        raise RuntimeError(msg) from exc
+    if not isinstance(response, dict) or response.get("ok") is not True:
+        error = response.get("error") if isinstance(response, dict) else "invalid response"
+        msg = f"skill inspection failed: {script_path}: {error}"
+        raise RuntimeError(msg)
+    metadata = response.get("metadata")
+    if not isinstance(metadata, dict):
+        msg = f"skill inspection returned no metadata: {script_path}"
+        raise TypeError(msg)
+    return SkillInspection.model_validate_json(json.dumps(metadata))
+
+
+def _inspection_command(temporary: Path) -> list[str]:
+    worker = [sys.executable, "-m", "roi_h.harness.worker"]
+    sandbox = shutil.which("sandbox-exec") if sys.platform == "darwin" else None
+    if sandbox is None:
+        return worker
+    profile = (
+        "(version 1) (allow default) (deny network*) "
+        f"(deny file-write* (require-not (subpath {json.dumps(str(temporary))})))"
+    )
+    return [sandbox, "-p", profile, *worker]
 
 
 def _import_script(*, skill: str, script_path: Path) -> ModuleType:

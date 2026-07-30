@@ -5,6 +5,15 @@ TOOL_ID = "snapshot"
 DESCRIPTION = "Capture a page digest for planning the next action."
 DETERMINISTIC = False
 REQUIRES_APPROVAL = False
+TOOL_EFFECT = 'read'
+IDEMPOTENCY = 'none'
+ALLOW_IN_PROD = True
+TIMEOUT_SECONDS = 180.0
+SECRET_NAMES = ()
+NETWORK_HOSTS = ('*',)
+FILESYSTEM_ROOTS = ()
+
+
 class Input(BaseModel):
     mode: str = Field(default="a11y", pattern=r"^(a11y|dom|text)$")
 class Output(BaseModel):

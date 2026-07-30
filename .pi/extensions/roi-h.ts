@@ -307,12 +307,6 @@ export default function roiHBridge(pi: ExtensionAPI) {
 				label: `ROI-H ${normalized}`,
 				description: `${manifest.description} Effect: ${manifest.effect}. Execution: ${manifest.execution_mode}.`,
 				promptSnippet: `ROI-H ${normalized} (${manifest.effect})`,
-				promptGuidelines: [
-					`Use exact arguments from the ${normalized} operation schema.`,
-					manifest.effect === "destructive"
-						? "Follow the operation plan and approval rules. Do not bypass them."
-						: "Preserve structured error codes and next actions.",
-				],
 				parameters: schemaForTool(manifest.input_schema),
 				executionMode: manifest.effect === "read" ? "parallel" : "sequential",
 				async execute(toolCallId, params, signal, onUpdate, executionContext) {
@@ -495,12 +489,6 @@ export default function roiHBridge(pi: ExtensionAPI) {
 		description:
 			"Execute any ROI-H operation. Use roi_h_search first for the exact operation schema. This supports reads, writes, approvals, tasks, secrets, plans, and destructive operations through ROI-H's own contract.",
 		promptSnippet: "Execute any typed ROI-H operation",
-		promptGuidelines: [
-			"Use roi_h_search or roi_h_activate before complex calls.",
-			"Pass a stable idempotency_key when repeating a write.",
-			"Use plan and apply operations for destructive work.",
-			"Never invent secret values. secret.set prompts the user directly.",
-		],
 		parameters: ExecuteParams,
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			return executeOperation(

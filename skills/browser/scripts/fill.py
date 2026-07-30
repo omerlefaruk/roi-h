@@ -5,6 +5,15 @@ TOOL_ID = "fill"
 DESCRIPTION = "Fill an input by stable label (preferred), ref, or selector."
 DETERMINISTIC = False
 REQUIRES_APPROVAL = False
+TOOL_EFFECT = 'write'
+IDEMPOTENCY = 'reconcile'
+ALLOW_IN_PROD = True
+TIMEOUT_SECONDS = 180.0
+SECRET_NAMES = ()
+NETWORK_HOSTS = ('*',)
+FILESYSTEM_ROOTS = ()
+
+
 class Input(BaseModel):
     value: str
     label: str = ""

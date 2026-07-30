@@ -4,6 +4,14 @@ from pathlib import Path
 from pydantic import BaseModel
 TOOL_ID="write_rows"; DESCRIPTION="Write list of dicts to csv or xlsx."; DETERMINISTIC=True; REQUIRES_APPROVAL=False
 FILESYSTEM_ROOTS=("run:work:read-write","run:output:read-write","run:tmp:read-write")
+TOOL_EFFECT = 'write'
+IDEMPOTENCY = 'reconcile'
+ALLOW_IN_PROD = True
+TIMEOUT_SECONDS = 120.0
+SECRET_NAMES = ()
+NETWORK_HOSTS = ()
+
+
 class Input(BaseModel):
     path: str
     rows: list[dict] = []

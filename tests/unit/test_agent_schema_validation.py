@@ -1,32 +1,40 @@
-"""JSON Schema validation at the public dispatcher seam."""
+"""Pydantic validation at the public dispatcher seam."""
 
 from __future__ import annotations
 
 import threading
 
 from roi_h.agent.catalog import OperationCatalog, OperationDefinition, build_catalog
-from roi_h.agent.contract import (
-    JSON_SCHEMA_DIALECT,
-    CommandRequest,
-    Effect,
-    Idempotency,
-    OperationManifest,
-)
+from roi_h.agent.contract import CommandRequest, Effect, Idempotency, OperationManifest
 from roi_h.agent.dispatcher import Dispatcher
+from roi_h.agent.operation_models import OperationModel, OperationOutput
 
 
-def test_public_operation_schemas_describe_required_arguments_and_results() -> None:
+class _TestInput(OperationModel):
+    value: str
+    home: str | None = None
+
+
+class _TestOutput(OperationOutput):
+    value: str
+
+
+def test_public_operation_schemas_come_from_typed_models() -> None:
     catalog = build_catalog()
-    run_start = catalog.describe("run.start")[0]
-    assert run_start.input_schema["required"] == ["goal"]
-    assert run_start.output_schema["required"] == [
+    definition = catalog.definition("run.start")
+    manifest = definition.manifest
+
+    assert manifest.input_schema == definition.input_model.model_json_schema()
+    assert manifest.output_schema == definition.output_model.model_json_schema()
+    assert manifest.input_schema["required"] == ["goal"]
+    assert manifest.output_schema["required"] == [
         "run_id",
         "object_id",
         "status",
         "project",
         "environment",
     ]
-    assert run_start.output_schema["properties"]["run_id"] == {"type": "string"}
+    assert manifest.output_schema["properties"]["run_id"]["type"] == "string"
 
     backup = catalog.describe("store.backup")[0]
     assert backup.execution_mode == "task"
@@ -45,7 +53,7 @@ def test_dispatcher_rejects_missing_required_operation_arguments() -> None:
     assert result.ok is False
     assert result.error is not None
     assert result.error.code == "request.invalid"
-    assert result.error.details["path"] == "arguments"
+    assert result.error.details["path"] == "arguments.goal"
 
 
 def test_idempotency_claim_blocks_concurrent_effects(tmp_path) -> None:
@@ -57,7 +65,7 @@ def test_idempotency_claim_blocks_concurrent_effects(tmp_path) -> None:
         assert release.wait(timeout=2)
         return {"value": "ok"}
 
-    catalog = _catalog(handler, output_type="string", idempotency=Idempotency.REQUIRED)
+    catalog = _catalog(handler, idempotency=Idempotency.REQUIRED)
     request = CommandRequest(
         idempotency_key="one-effect",
         arguments={"home": str(tmp_path / "home"), "value": "same"},
@@ -84,7 +92,7 @@ def test_idempotency_claim_blocks_concurrent_effects(tmp_path) -> None:
     assert replay.warnings == ["Returned the first result for this idempotency key."]
 
 
-def test_dispatcher_rejects_arguments_that_do_not_match_input_schema() -> None:
+def test_dispatcher_rejects_arguments_that_do_not_match_input_model() -> None:
     called = False
 
     def handler(_request: CommandRequest) -> dict[str, object]:
@@ -92,8 +100,7 @@ def test_dispatcher_rejects_arguments_that_do_not_match_input_schema() -> None:
         called = True
         return {"value": "ok"}
 
-    dispatcher = Dispatcher(_catalog(handler, output_type="string"))
-    result = dispatcher.execute(
+    result = Dispatcher(_catalog(handler)).execute(
         "test.schema",
         CommandRequest(arguments={"value": 12, "unknown": True}),
     )
@@ -101,13 +108,12 @@ def test_dispatcher_rejects_arguments_that_do_not_match_input_schema() -> None:
     assert result.ok is False
     assert result.error is not None
     assert result.error.code == "request.invalid"
-    assert result.error.details["path"] == "arguments"
+    assert result.error.details["path"] == "arguments.unknown"
     assert called is False
 
 
-def test_dispatcher_rejects_handler_output_that_does_not_match_schema() -> None:
-    dispatcher = Dispatcher(_catalog(lambda _request: {"value": 12}, output_type="string"))
-    result = dispatcher.execute(
+def test_dispatcher_rejects_handler_output_that_does_not_match_model() -> None:
+    result = Dispatcher(_catalog(lambda _request: {"value": 12})).execute(
         "test.schema",
         CommandRequest(arguments={"value": "valid"}),
     )
@@ -122,7 +128,6 @@ def test_dispatcher_rejects_handler_output_that_does_not_match_schema() -> None:
 def _catalog(
     handler: object,
     *,
-    output_type: str,
     idempotency: Idempotency = Idempotency.NOT_APPLICABLE,
 ) -> OperationCatalog:
     catalog = OperationCatalog()
@@ -131,23 +136,8 @@ def _catalog(
             manifest=OperationManifest(
                 operation_id="test.schema",
                 description="Schema validation test.",
-                input_schema={
-                    "$schema": JSON_SCHEMA_DIALECT,
-                    "type": "object",
-                    "properties": {
-                        "value": {"type": "string"},
-                        "home": {"type": "string"},
-                    },
-                    "required": ["value"],
-                    "additionalProperties": False,
-                },
-                output_schema={
-                    "$schema": JSON_SCHEMA_DIALECT,
-                    "type": "object",
-                    "properties": {"value": {"type": output_type}},
-                    "required": ["value"],
-                    "additionalProperties": False,
-                },
+                input_schema=_TestInput.model_json_schema(),
+                output_schema=_TestOutput.model_json_schema(),
                 effect=Effect.READ,
                 idempotency=idempotency,
                 approval_rule="none",
@@ -159,6 +149,8 @@ def _catalog(
                 execution_mode="sync",
                 timeout_seconds=10,
             ),
+            input_model=_TestInput,
+            output_model=_TestOutput,
             handler=handler,  # type: ignore[arg-type]
         )
     )

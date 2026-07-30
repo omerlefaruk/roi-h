@@ -29,6 +29,9 @@ Capabilities live under `skills/`. Each script exports `TOOL_ID`, `Input`, `Outp
 execute it, emit canonical `tool.requested` / `tool.responded` events, and materialize the
 terminal `rpa.step`.
 
+External AI clients discover and execute the same typed operation catalog. ROI-H does
+not embed a model provider or a second orchestration loop.
+
 The production path is deliberately linear:
 
 ```shell
