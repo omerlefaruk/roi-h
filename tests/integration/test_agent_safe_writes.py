@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from roi_h.harness.custom import define_project_tool
+
 
 def _call(
     operation: str,
@@ -107,6 +109,13 @@ def test_agent_run_tool_and_approval_rejection_journey(tmp_path: Path) -> None:
     )
     assert created.returncode == 0, created.stdout
 
+    define_project_tool(
+        skill="approval",
+        tool="request",
+        description="Request approval without an external effect.",
+        project_root=Path(home) / "projects" / "demo" / "skills",
+    )
+
     started = _call(
         "run.start",
         {
@@ -127,7 +136,7 @@ def test_agent_run_tool_and_approval_rejection_journey(tmp_path: Path) -> None:
         "tool.invoke",
         {
             "schema_version": "1.0",
-            "idempotency_key": "shell-not-approved",
+            "idempotency_key": "request-not-approved",
             "context": {
                 "project": "demo",
                 "environment": "dev",
@@ -135,8 +144,8 @@ def test_agent_run_tool_and_approval_rejection_journey(tmp_path: Path) -> None:
             },
             "arguments": {
                 "home": home,
-                "name": "shell.run",
-                "arguments": {"command": "printf should-not-run"},
+                "name": "approval.request",
+                "arguments": {"value": "Do not run."},
             },
         },
         cwd=tmp_path,
@@ -150,7 +159,7 @@ def test_agent_run_tool_and_approval_rejection_journey(tmp_path: Path) -> None:
         "approval.reject",
         {
             "schema_version": "1.0",
-            "idempotency_key": "reject-shell",
+            "idempotency_key": "reject-request",
             "context": {
                 "project": "demo",
                 "environment": "dev",

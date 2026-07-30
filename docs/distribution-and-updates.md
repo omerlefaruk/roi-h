@@ -65,8 +65,7 @@ The repository and Python distribution contain only the generic ROI-H product:
 
 - the `roi_h` CLI, public Python interfaces, harness, and observer;
 - observer static assets and `py.typed`;
-- the generic `browser`, `files`, `excel`, `http`, `pdf`, `shell`, and `feedback`
-  core skills;
+- the generic `browser`, `files`, `excel`, and `pdf` core skills;
 - packaging metadata, the proprietary license notice, generic documentation, tests, and
   release tooling in the Git repository; and
 - only the runtime subset above in the wheel and source distribution.

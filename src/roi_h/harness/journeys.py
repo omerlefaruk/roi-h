@@ -356,10 +356,7 @@ def _run_automation(
     }
     if seeded is not None:
         result["seeded"] = seeded
-    result["next"] = {
-        "status": f"roi-h rpa status --run-id {rid}",
-        "feedback": "roi-h rpa invoke --run-id RUN feedback list --args '{}'",
-    }
+    result["next"] = {"status": f"roi-h rpa status --run-id {rid}"}
     return result
 
 

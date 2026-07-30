@@ -84,7 +84,7 @@ def run_recipe(
 
     ``skip_phases``: phase names already completed (e.g. seeded from handoff).
     ``force``: skip approval gates (prod runner default).
-    ``collect_feedback``: after a live run, invoke ``feedback.record`` if present.
+    ``collect_feedback``: after a live run, record compact run feedback.
     """
     issues = validate_recipe(recipe)
     if issues:

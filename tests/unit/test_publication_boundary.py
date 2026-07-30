@@ -9,11 +9,28 @@ def test_rejects_private_runtime_and_customer_material() -> None:
         "analysis/customer-session.md",
         "challenge.xlsx",
         "skills/ata/SKILL.md",
+        "skills/feedback/scripts/record.py",
+        "skills/http/scripts/get.py",
+        "skills/shell/scripts/run.py",
         "projects/acme/dev/automations/job/recipe.json",
         "customer/browser-profile/Default/Cookies",
     ]
 
     assert publication_violations(paths) == sorted(paths)
+
+
+def test_accepts_retired_core_skills_only_in_history() -> None:
+    paths = [
+        "skills/feedback/scripts/record.py",
+        "skills/http/scripts/get.py",
+        "skills/shell/scripts/run.py",
+    ]
+
+    assert publication_violations(paths) == paths
+    assert publication_violations(paths, history=True) == []
+    assert publication_violations(["skills/http/customer/acme.txt"], history=True) == [
+        "skills/http/customer/acme.txt"
+    ]
 
 
 def test_accepts_generic_core_files_and_public_skills() -> None:

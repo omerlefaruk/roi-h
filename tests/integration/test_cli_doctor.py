@@ -35,11 +35,8 @@ def test_doctor_reports_json_without_creating_user_paths(tmp_path: Path) -> None
     assert report["built_in_skills"] == {
         "browser": True,
         "excel": True,
-        "feedback": True,
         "files": True,
-        "http": True,
         "pdf": True,
-        "shell": True,
     }
     assert {check["code"] for check in report["checks"]} == {
         "application.version",

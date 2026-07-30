@@ -14,6 +14,7 @@ NETWORK_HOSTS = ()
 
 class Input(BaseModel):
     path: str
+    sheet: str = ""
     rows: list[dict] = []
     headers: list[str] = []
 class Output(BaseModel):
@@ -33,6 +34,8 @@ def run(args: Input) -> Output:
     else:
         from openpyxl import Workbook
         wb = Workbook(); ws = wb.active
+        if args.sheet:
+            ws.title = args.sheet
         ws.append(headers)
         for row in args.rows:
             ws.append([row.get(h, "") for h in headers])

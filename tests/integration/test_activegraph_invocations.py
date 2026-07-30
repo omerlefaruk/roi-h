@@ -143,13 +143,13 @@ def test_force_does_not_bypass_production_execution_policy(tmp_path: Path) -> No
         skills_root=default_skills_root(),
         auto_approve=True,
     )
-    harness.start_run("do not run arbitrary shell")
+    harness.start_run("do not run development exploration tools")
 
-    result = harness.invoke("shell", "run", {"command": "echo unsafe"}, force=True)
+    result = harness.invoke("browser", "snapshot", {}, force=True)
 
     assert result.status == "error"
     assert result.failure is not None
-    assert "production policy denies shell.run" in result.failure.message
+    assert "production policy denies browser.snapshot" in result.failure.message
     assert harness.runtime.graph.objects(type="rpa.invocation") == []
 
 

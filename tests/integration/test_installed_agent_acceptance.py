@@ -126,7 +126,7 @@ def test_installed_cli_agent_acceptance_from_empty_home(  # noqa: PLR0915
         isolated_cwd,
         clean_environment,
         "tool.show",
-        {**base, "arguments": {**base["arguments"], "name": "files.read"}},
+        {**base, "arguments": {**base["arguments"], "name": "files.hash"}},
     )
     assert shown_tool["result"]["input_schema"]["type"] == "object"
 

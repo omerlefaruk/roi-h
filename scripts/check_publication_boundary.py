@@ -11,15 +11,18 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-PUBLIC_SKILLS = frozenset(
+PUBLIC_SKILLS = frozenset({"browser", "excel", "files", "pdf"})
+_HISTORICAL_PUBLIC_SKILL_FILES = frozenset(
     {
-        "browser",
-        "excel",
-        "feedback",
-        "files",
-        "http",
-        "pdf",
-        "shell",
+        "skills/feedback/SKILL.md",
+        "skills/feedback/scripts/list.py",
+        "skills/feedback/scripts/record.py",
+        "skills/http/SKILL.md",
+        "skills/http/scripts/download.py",
+        "skills/http/scripts/get.py",
+        "skills/http/scripts/post.py",
+        "skills/shell/SKILL.md",
+        "skills/shell/scripts/run.py",
     }
 )
 
@@ -78,7 +81,7 @@ _FORBIDDEN_SUFFIXES = (
 )
 
 
-def publication_violations(paths: Iterable[str]) -> list[str]:
+def publication_violations(paths: Iterable[str], *, history: bool = False) -> list[str]:
     """Return tracked paths that do not belong in the generic core repository."""
     violations: list[str] = []
     for raw_path in paths:
@@ -95,7 +98,13 @@ def publication_violations(paths: Iterable[str]) -> list[str]:
             continue
         if path.startswith("skills/"):
             skill = parts[1] if len(parts) > 1 else ""
-            if skill and skill not in PUBLIC_SKILLS and skill != "SKILL.md":
+            retired_public_file = history and path in _HISTORICAL_PUBLIC_SKILL_FILES
+            if (
+                skill
+                and skill not in PUBLIC_SKILLS
+                and skill != "SKILL.md"
+                and not retired_public_file
+            ):
                 violations.append(path)
     return sorted(set(violations))
 
@@ -139,7 +148,7 @@ def main() -> int:
         return 2
     check_history = arguments == ["--history"]
     candidates = historical_files(repository) if check_history else tracked_files(repository)
-    violations = publication_violations(candidates)
+    violations = publication_violations(candidates, history=check_history)
     if not violations:
         scope = "history" if check_history else "current tree"
         sys.stdout.write(f"Publication boundary ({scope}): OK\n")

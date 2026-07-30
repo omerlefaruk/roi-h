@@ -12,15 +12,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-_PUBLIC_SKILLS = {
-    "browser",
-    "excel",
-    "feedback",
-    "files",
-    "http",
-    "pdf",
-    "shell",
-}
+_PUBLIC_SKILLS = {"browser", "excel", "files", "pdf"}
 
 
 def test_wheel_contains_only_roi_h_and_distribution_metadata(tmp_path: Path) -> None:
@@ -41,7 +33,19 @@ def test_wheel_contains_only_roi_h_and_distribution_metadata(tmp_path: Path) -> 
     assert not any(name.startswith("roi_h/packs/") for name in names)
     assert "roi_h/_skills/SKILL.md" not in names
     assert "roi_h/_skills/browser/scripts/navigate.py" in names
-    assert not any(name.startswith(("roi_h/ata/", "roi_h/_skills/ata/")) for name in names)
+    assert "roi_h/_skills/files/scripts/hash.py" in names
+    assert not any(
+        name.startswith(
+            (
+                "roi_h/ata/",
+                "roi_h/_skills/ata/",
+                "roi_h/_skills/feedback/",
+                "roi_h/_skills/http/",
+                "roi_h/_skills/shell/",
+            )
+        )
+        for name in names
+    )
     assert all(name.startswith(("roi_h/", "roi_h-")) for name in names)
     assert not any("automationbench" in name.lower() or "/ab/" in name.lower() for name in names)
     assert not any(name.startswith("tests/") for name in names)

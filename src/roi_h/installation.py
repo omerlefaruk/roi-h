@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 SCHEMA_VERSION: Literal[1] = 1
 SUPPORTED_PYTHON = (3, 12)
-BUILT_IN_SKILLS = ("browser", "excel", "feedback", "files", "http", "pdf", "shell")
+BUILT_IN_SKILLS = ("browser", "excel", "files", "pdf")
 _PROTOCOL_RESULT = 2
 
 type HealthStatus = Literal["pass", "fail", "pending"]
