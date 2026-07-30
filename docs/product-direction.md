@@ -11,8 +11,13 @@ production use.
 The product value is not the ActiveGraph database. The value is a reliable path from:
 
 ```text
-AI-assisted discovery → approved execution → evidence → immutable automation → audited production run
+explore → solve → verify → immutable automation → audited production run
 ```
+
+ActiveGraph owns durable runs, authority, decisions, effects, evidence, replay, lineage,
+and projections. ROI-H adds only product policy, customer-owned storage, isolated effects,
+and package delivery. Production automations use one verified `automation.py:run(context)`
+entry point after the restricted runner replaces the current recipe runtime.
 
 ## First target workflow
 

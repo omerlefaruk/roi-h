@@ -1,7 +1,7 @@
 # ROI-H Distribution, Installation, and Updates
 
-**Status:** Public macOS ARM64 and Windows x86-64 installer paths implemented; native
-Windows acceptance and signed channel metadata pending
+**Status:** Legacy bootstrap paths implemented; native macOS and Windows customer delivery
+in progress
 **Audience:** Release engineers and implementation agents
 **Last updated:** 2026-07-29
 
@@ -10,18 +10,21 @@ ROI-H itself. It describes how an operator installs and updates the `roi-h` appl
 It does not describe `roi-h rpa ship`, which publishes an automation package inside an
 ROI-H workspace.
 
-The dependency-ordered implementation authority is
-[`release-implementation-plan.md`](release-implementation-plan.md). Its paste-ready
-handoff is
-[`handoffs/release-implementation-handoff.md`](handoffs/release-implementation-handoff.md).
+This document and the live release checks are the implementation authority. The older
+[`release implementation plan`](release-implementation-plan.md) and its handoff describe
+the temporary bootstrap path only.
 
 ## Decision
 
-ROI-H remains a Python distribution internally, published as a wheel and source
-distribution to PyPI or an approved private Python index. Normal operators must not need
-to understand Python, virtual environments, `pip`, `uv`, or Playwright.
+ROI-H remains a Python distribution internally. Wheels are native-package build inputs,
+not the customer installation journey. The target customer paths are a notarized,
+current-user macOS package and a signed Windows MSIX delivered through App Installer.
+Both bind an exact Playwright release and digest-verified Chromium target, retain the
+active and previous healthy versions, and keep `ROI_H_HOME` unchanged.
 
-The available macOS ARM64 installation surface is:
+The current shell and PowerShell bootstraps remain temporary compatibility paths until the
+native install, update, rollback, browser-launch, and data-preservation gates pass. The
+available macOS ARM64 compatibility surface is:
 
 ```shell
 curl -LsSf https://raw.githubusercontent.com/omerlefaruk/roi-h/main/install.sh | sh
@@ -30,13 +33,14 @@ curl -LsSf https://raw.githubusercontent.com/omerlefaruk/roi-h/main/install.sh |
 GitHub Releases hosts the immutable release bundle. A branded `get.roi-h.dev` alias can
 be added later without hosting any files on an operator's computer.
 
-Windows 11 x86-64 uses the equivalent user-local PowerShell command:
+The Windows 11 x86-64 compatibility surface uses the equivalent user-local PowerShell
+command:
 
 ```powershell
 irm https://raw.githubusercontent.com/omerlefaruk/roi-h/main/install.ps1 | iex
 ```
 
-The supported update surface is:
+The current compatibility update surface is:
 
 ```shell
 roi-h update

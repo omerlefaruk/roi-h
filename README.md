@@ -10,7 +10,7 @@ production use.
 The main path is:
 
 ```text
-AI-assisted discovery → approved execution → evidence → immutable automation → audited production run
+explore → solve → verify → immutable automation → audited production run
 ```
 
 ROI-H is built on `activegraph==1.10.0`. ActiveGraph owns lifecycle, authority decisions,
@@ -105,7 +105,11 @@ depend on GitHub Actions; see
 [`docs/distribution-and-updates.md`](docs/distribution-and-updates.md) for the local
 publish procedure and external automation options.
 
-Build one self-contained macOS ARM64 candidate from the locked Python 3.12 environment:
+The shell and PowerShell release bundles below are temporary compatibility paths while
+native macOS package and Windows MSIX delivery complete their acceptance gates.
+
+Build one self-contained macOS ARM64 compatibility candidate from the locked Python 3.12
+environment:
 
 ```shell
 uv run python scripts/prepare_release_candidate.py \
