@@ -457,8 +457,9 @@ Required before exact-version update and rollback are advertised:
 already have a documented recoverable uninstall path.
 
 These commands are an external product interface. Their machine-readable results and exit
-codes should be stable and covered by tests. The common contract and operation catalog
-are defined in [`external-ai-cli-plan.md`](external-ai-cli-plan.md).
+codes should be stable and covered by tests. The
+[external-AI operator guide](external-ai-cli-operator-guide.md) defines their use. The
+live manifest from `roi-h agent describe` defines the operation catalog.
 
 ## Acceptance criteria
 
