@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -57,6 +58,25 @@ def test_project_resolution_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert Workspace.open(home).project == "beta"
 
     assert Workspace.open(home, project="alpha").project == "alpha"
+
+
+def test_open_removes_legacy_adaptive_policy_from_all_environments(tmp_path: Path) -> None:
+    home = tmp_path / ".roi-h"
+    create_project(home, "acme", set_active=True)
+    manifests = [
+        home / "projects" / "acme" / "environments" / env / "environment.json"
+        for env in ("dev", "prod")
+    ]
+    for manifest in manifests:
+        config = json.loads(manifest.read_text(encoding="utf-8"))
+        config["execution"]["allow_adaptive"] = True
+        manifest.write_text(json.dumps(config), encoding="utf-8")
+
+    Workspace.open(home, project="acme", env="dev")
+
+    for manifest in manifests:
+        updated = json.loads(manifest.read_text(encoding="utf-8"))
+        assert "allow_adaptive" not in updated["execution"]
 
 
 def test_env_lives_on_project_config(tmp_path: Path) -> None:

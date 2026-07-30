@@ -436,23 +436,6 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     invoke.set_defaults(handler=_cmd_invoke)
 
-    adapt = rpa_sub.add_parser(
-        "adapt",
-        help="Run a bounded Codex-guided development loop",
-    )
-    _add_run_options(adapt)
-    adapt.add_argument("--goal", required=True)
-    adapt.add_argument(
-        "--tool",
-        action="append",
-        required=True,
-        dest="adaptive_tools",
-        help="Allowed skill.tool name (repeatable; destructive tools are rejected)",
-    )
-    adapt.add_argument("--max-turns", type=int, default=6)
-    adapt.add_argument("--actor", default="codex")
-    adapt.set_defaults(handler=_cmd_adapt)
-
     # status
     status = rpa_sub.add_parser("status", help="Run summary + approvals + artifacts + advice")
     _add_run_options(status)
@@ -1244,25 +1227,6 @@ def _cmd_invoke(args: argparse.Namespace) -> dict[str, Any]:
         "idempotency_key": step.idempotency_key,
         "attempt": step.attempt,
     }
-
-
-def _cmd_adapt(args: argparse.Namespace) -> dict[str, Any]:
-    _validate_run_id(args.run_id)
-    ws = _workspace(args)
-    harness = _open_harness(
-        ws,
-        run_id=args.run_id,
-        skills=args.skills,
-        budget=_budget(args),
-        auto_approve=args.auto_approve,
-        create_if_missing=False,
-    )
-    return harness.adapt(
-        args.goal,
-        tools=args.adaptive_tools,
-        max_turns=args.max_turns,
-        actor=args.actor,
-    )
 
 
 def _cmd_status(args: argparse.Namespace) -> dict[str, Any]:

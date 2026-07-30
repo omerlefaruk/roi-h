@@ -590,7 +590,6 @@ a project.
     "busy_timeout_ms": 10000
   },
   "execution": {
-    "allow_adaptive": false,
     "allow_ambient_project_skills": false
   }
 }
@@ -1682,9 +1681,8 @@ Importing a project does not automatically authorize:
 - custom skill execution;
 - production promotion;
 - secret access;
-- network access;
-- destructive tools; or
-- adaptive execution.
+- network access; or
+- destructive tools.
 
 Imported custom skills are marked unreviewed unless the archive carries a locally trusted
 signature. Package digest proves integrity, not trust.
