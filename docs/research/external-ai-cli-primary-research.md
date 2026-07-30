@@ -206,7 +206,7 @@ A plan must include:
 
 Apply must fail with `plan.state_changed` if the digest no longer matches. It must fail with `plan.expired` after expiry.
 
-The current `gc plan/show/apply` flow is the correct pattern. `store compact` also previews by default. Extend this pattern to project deletion, restore, migration, automation promotion, skill deletion, and other destructive work. Do not use a generic `--force` as the only safety boundary for large changes.
+The current `gc plan/show/apply` flow is the correct pattern. Extend this pattern to project deletion, restore, automation promotion, skill deletion, and other destructive work. Do not use a generic `--force` as the only safety boundary for large changes.
 
 ### 7. Lists must be bounded and stable
 
@@ -327,7 +327,7 @@ The assessment below comes from the current [CLI](../../src/roi_h/cli.py) and ha
 - `rpa tools` exposes tool schemas, effects, approvals, scope, and idempotency.
 - ActiveGraph owns durable runs, invocations, approvals, and idempotency identities.
 - Projects have typed paths, doctor checks, export, and import.
-- Store status, check, backup, restore, migrate, and compact exist.
+- Store status, check, backup, and restore exist.
 - Run inputs use logical paths.
 - Artifacts have IDs, hashes, sizes, and export.
 - Garbage collection already uses plan, show, and apply.
@@ -425,10 +425,6 @@ store.check
 store.backup
 store.restore.plan
 store.restore.apply
-store.migrate.plan
-store.migrate.apply
-store.compact.plan
-store.compact.apply
 
 retention.plan
 retention.show

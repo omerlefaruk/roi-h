@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -117,6 +118,28 @@ def test_operator_cli_tools_start_invoke_status_round_trip(tmp_path: Path) -> No
     summary = json.loads(status.stdout)
     assert summary["step_count"] == 2
     assert summary["error_steps"] == 1
+
+
+def test_store_status_honors_db_override(tmp_path: Path) -> None:
+    home = str(tmp_path / ".roi-h")
+    init = _roi_h("rpa", "project", "create", "demo", "--home", home, cwd=tmp_path)
+    assert init.returncode == 0, init.stderr
+
+    db = tmp_path / "override.sqlite"
+    with sqlite3.connect(db):
+        pass
+    status = _roi_h(
+        "rpa",
+        "store",
+        "status",
+        "--home",
+        home,
+        "--db",
+        str(db),
+        cwd=tmp_path,
+    )
+    assert status.returncode == 0, status.stderr
+    assert json.loads(status.stdout)["exists"] is True
 
 
 def test_cli_start_auto_run_id(tmp_path: Path) -> None:
@@ -385,11 +408,6 @@ def test_human_destructive_commands_use_plan_and_apply(tmp_path: Path) -> None:
         cwd=tmp_path,
     )
     assert restore_apply.returncode == 0, restore_apply.stderr
-
-    for command in (("migrate", "plan"), ("compact", "plan")):
-        planned = _roi_h("rpa", "store", *command, "--home", home, cwd=tmp_path)
-        assert planned.returncode == 0, (command, planned.stdout, planned.stderr)
-        assert json.loads(planned.stdout)["plan_id"].startswith("plan_")
 
     delete_plan = _roi_h(
         "rpa",

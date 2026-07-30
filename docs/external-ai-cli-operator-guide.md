@@ -92,8 +92,6 @@ Examples include:
 
 - `project.delete.plan` and `project.delete.apply`
 - `store.restore.plan` and `store.restore.apply`
-- `store.migrate.plan` and `store.migrate.apply`
-- `store.compact.plan` and `store.compact.apply`
 - `skill.delete.plan` and `skill.delete.apply`
 - `retention.plan`, `retention.show`, and `retention.apply`
 

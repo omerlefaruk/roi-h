@@ -7,7 +7,7 @@ import os
 import shutil
 import sqlite3
 import tempfile
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -90,33 +90,6 @@ class RestoreResult:
         data = asdict(self)
         data["store"] = self.store.to_dict()
         return data
-
-
-@dataclass(frozen=True)
-class MigrationResult:
-    """Explicit store migration result."""
-
-    ok: bool
-    changed: bool
-    target: str
-    message: str
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass(frozen=True)
-class CompactionResult:
-    """Plan-first compaction result; apply remains disabled until qualified."""
-
-    ok: bool
-    applied: bool
-    enabled: bool
-    policy: dict[str, Any] = field(default_factory=dict)
-    message: str = "compaction is disabled until snapshot and fork-horizon qualification"
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
 
 
 class StoreLifecycle:
@@ -354,31 +327,6 @@ class StoreLifecycle:
             store=status,
         )
 
-    def migrate(self, workspace: Workspace, target: str = "current") -> MigrationResult:
-        status = self.inspect(workspace)
-        if not status.ok:
-            msg = "store.migration_failed: selected store cannot be opened"
-            raise RuntimeError(msg)
-        return MigrationResult(
-            ok=True,
-            changed=False,
-            target=target,
-            message="ActiveGraph owns schema migration; the selected schema is already openable",
-        )
-
-    def compact(
-        self,
-        workspace: Workspace,
-        policy: dict[str, Any] | None = None,
-        *,
-        apply: bool = False,
-    ) -> CompactionResult:
-        del workspace
-        if apply:
-            msg = "store.migration_failed: compaction apply is disabled until qualification"
-            raise RuntimeError(msg)
-        return CompactionResult(ok=True, applied=False, enabled=False, policy=dict(policy or {}))
-
 
 def _connect_read_only(path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
@@ -452,8 +400,6 @@ def _validate_backup(source: Path, workspace: Workspace) -> None:
 
 
 __all__ = [
-    "CompactionResult",
-    "MigrationResult",
     "RestoreResult",
     "StoreBackup",
     "StoreCheck",

@@ -84,7 +84,7 @@ def test_installed_cli_agent_acceptance_from_empty_home(  # noqa: PLR0915
     described = _run(executable, isolated_cwd, clean_environment, "agent", "describe")
     assert described.returncode == 0, described.stdout
     operations = json.loads(described.stdout)["result"]["operations"]
-    assert len(operations) == 83
+    assert len(operations) == 79
 
     created = _call(
         executable,

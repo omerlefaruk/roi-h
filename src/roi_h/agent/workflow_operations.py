@@ -602,73 +602,6 @@ def store_restore_apply(request: CommandRequest) -> dict[str, Any]:
     return _safe(result)
 
 
-def store_migrate_plan(request: CommandRequest) -> dict[str, Any]:
-    workspace = _workspace(request)
-    plan = _new_plan(
-        workspace,
-        operation="store.migrate",
-        arguments={"target": str(request.arguments.get("target") or "current")},
-        effects=[{"action": "migrate_store_schema", "environment": workspace.env}],
-        state_digest=_path_digest(workspace.db),
-        apply_operation="store.migrate.apply",
-    )
-    return plan.model_dump(mode="json")
-
-
-def store_migrate_apply(request: CommandRequest) -> dict[str, Any]:
-    workspace = _workspace(request)
-    plan = _checked_plan(request, workspace, "store.migrate.apply")
-    if _path_digest(workspace.db) != plan.state_digest:
-        _state_changed()
-    result = (
-        StoreLifecycle()
-        .migrate(
-            workspace,
-            target=str(plan.arguments["target"]),
-        )
-        .to_dict()
-    )
-    _plan_path(workspace, plan.plan_id).unlink(missing_ok=True)
-    return _safe(result)
-
-
-def store_compact_plan(request: CommandRequest) -> dict[str, Any]:
-    workspace = _workspace(request)
-    policy = _mapping(request.arguments.get("policy")) or {}
-    preview = StoreLifecycle().compact(workspace, policy, apply=False).to_dict()
-    plan = _new_plan(
-        workspace,
-        operation="store.compact",
-        arguments={"policy": policy},
-        effects=[{"action": "compact_store", "preview": _safe(preview)}],
-        blockers=[] if preview.get("enabled") else [{"reason": preview.get("message")}],
-        state_digest=_path_digest(workspace.db),
-        apply_operation="store.compact.apply",
-    )
-    return plan.model_dump(mode="json")
-
-
-def store_compact_apply(request: CommandRequest) -> dict[str, Any]:
-    workspace = _workspace(request)
-    plan = _checked_plan(request, workspace, "store.compact.apply")
-    if plan.blockers:
-        msg = "operation.failed: store compaction plan has blockers"
-        raise RuntimeError(msg)
-    if _path_digest(workspace.db) != plan.state_digest:
-        _state_changed()
-    result = (
-        StoreLifecycle()
-        .compact(
-            workspace,
-            cast("dict[str, Any]", plan.arguments["policy"]),
-            apply=True,
-        )
-        .to_dict()
-    )
-    _plan_path(workspace, plan.plan_id).unlink(missing_ok=True)
-    return _safe(result)
-
-
 def support_bundle_create(request: CommandRequest) -> dict[str, Any]:
     home = resolve_home(request.arguments.get("home"))
     target = Path(_required_string(request, "output")).expanduser().resolve()
@@ -709,6 +642,7 @@ def _workspace(request: CommandRequest) -> Workspace:
         request.arguments.get("home"),
         project=request.context.project or request.arguments.get("project"),
         env=request.context.environment or request.arguments.get("environment"),
+        db=request.arguments.get("db"),
     )
 
 
@@ -944,10 +878,6 @@ __all__ = [
     "skill_delete_apply",
     "skill_delete_plan",
     "skill_promote",
-    "store_compact_apply",
-    "store_compact_plan",
-    "store_migrate_apply",
-    "store_migrate_plan",
     "store_restore_apply",
     "store_restore_plan",
     "support_bundle_create",

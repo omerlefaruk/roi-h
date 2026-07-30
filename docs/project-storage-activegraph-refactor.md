@@ -163,8 +163,7 @@ the storage implementation but allows every caller to construct additional paths
 
 ### 5.2 Run filesystem
 
-`src/roi_h/harness/runtime_paths.py` and
-`src/roi_h/harness/invocation_runtime.py` currently place:
+`src/roi_h/harness/invocation_runtime.py` currently places:
 
 ```text
 <environment>/artifacts/<run-id>/_workspace/
@@ -197,8 +196,7 @@ non-portable.
 
 ### 5.5 Artifacts and handoffs
 
-`src/roi_h/harness/artifacts.py` copies an artifact into a run directory and calculates
-SHA-256. `src/roi_h/harness/phases.py` creates phase handoff packages.
+`src/roi_h/harness/phases.py` creates phase handoff packages.
 
 `src/roi_h/harness/reconcile.py` already compares ActiveGraph artifact and phase records
 with files and can perform bounded repairs. This is the correct recovery foundation.
@@ -976,8 +974,6 @@ inspect(workspace) -> StoreStatus
 check(workspace, level) -> StoreCheck
 backup(workspace, destination) -> StoreBackup
 restore(workspace, backup, mode) -> RestoreResult
-migrate(workspace, target) -> MigrationResult
-compact(workspace, policy, apply=False) -> CompactionResult
 ```
 
 The implementation hides:
@@ -991,9 +987,7 @@ The implementation hides:
 - temporary-file placement;
 - backup manifests and hashes;
 - restore staging;
-- ActiveGraph migration invocation;
-- post-restore replay verification; and
-- compaction-horizon checks.
+- post-restore replay verification.
 
 ### 14.4 SQLite durability
 
@@ -2124,8 +2118,6 @@ roi-h rpa store status
 roi-h rpa store check [--full]
 roi-h rpa store backup --output FILE
 roi-h rpa store restore FILE
-roi-h rpa store migrate
-roi-h rpa store compact --dry-run
 ```
 
 Use `store`, not `database`, in the stable CLI because SQLite is an adapter detail.

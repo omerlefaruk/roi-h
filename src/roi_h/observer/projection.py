@@ -776,14 +776,6 @@ def _display_name(value: str) -> str:
     return value.replace("-", " ").replace("_", " ").strip().capitalize()
 
 
-def _parse_object(value: str) -> dict[str, Any]:
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
 def _read_json(path: Path) -> dict[str, Any]:
     if not path.is_file():
         return {}

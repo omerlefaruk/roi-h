@@ -54,6 +54,7 @@ def _run_task(tasks: TaskStore, task_id: str) -> CommandResult:
         arguments.get("home"),
         project=context.get("project") or arguments.get("project"),
         env=context.get("environment") or arguments.get("environment"),
+        db=arguments.get("db"),
     )
     backup = StoreLifecycle().backup(workspace, str(arguments.get("output") or ""))
     data = backup.to_dict()

@@ -328,8 +328,6 @@ Use plan and apply for:
 - project delete;
 - state-replacing project import;
 - store restore;
-- store migrate;
-- store compact;
 - skill delete; and
 - retention.
 

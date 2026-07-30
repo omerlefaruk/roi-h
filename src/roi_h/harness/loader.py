@@ -7,7 +7,7 @@ import importlib.util
 import os
 import re
 import sys
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -404,12 +404,3 @@ def validate_skill_token(value: str, *, kind: str) -> str:
         msg = f"invalid {kind} {value!r}: cannot start with '-' or '.'"
         raise ValueError(msg)
     return value
-
-
-def iter_skill_dirs(root: Path) -> Iterable[Path]:
-    """Yield skill directories that contain a SKILL.md."""
-    if not root.is_dir():
-        return
-    for path in sorted(root.iterdir()):
-        if path.is_dir() and (path / "SKILL.md").is_file():
-            yield path

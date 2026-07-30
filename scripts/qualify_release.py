@@ -70,65 +70,29 @@ def main() -> int:
         "skills",
         "scripts",
     )
-    _uv_run(PYTHON_VERSION, "ruff", "check", ".")
-    _uv_run(PYTHON_VERSION, "ruff", "format", "--check", ".")
-    _uv_run(PYTHON_VERSION, "mypy")
-    _uv_run(PYTHON_VERSION, "python", "-m", "pytest")
-    _run(
-        [
-            "uv",
-            "run",
-            "--directory",
-            str(INSTALLER_PROJECT),
-            "--python",
-            PYTHON_VERSION,
-            "--no-sync",
-            "ruff",
-            "check",
-            ".",
-        ],
-    )
-    _run(
-        [
-            "uv",
-            "run",
-            "--directory",
-            str(INSTALLER_PROJECT),
-            "--python",
-            PYTHON_VERSION,
-            "--no-sync",
-            "ruff",
-            "format",
-            "--check",
-            ".",
-        ],
-    )
-    _run(
-        [
-            "uv",
-            "run",
-            "--directory",
-            str(INSTALLER_PROJECT),
-            "--python",
-            PYTHON_VERSION,
-            "--no-sync",
-            "mypy",
-        ],
-    )
-    _run(
-        [
-            "uv",
-            "run",
-            "--directory",
-            str(INSTALLER_PROJECT),
-            "--python",
-            PYTHON_VERSION,
-            "--no-sync",
-            "python",
-            "-m",
-            "pytest",
-        ],
-    )
+    for command in (
+        ("ruff", "check", "."),
+        ("ruff", "format", "--check", "."),
+        ("mypy",),
+        ("python", "-m", "pytest"),
+    ):
+        _uv_run(PYTHON_VERSION, *command)
+    installer_prefix = [
+        "uv",
+        "run",
+        "--directory",
+        str(INSTALLER_PROJECT),
+        "--python",
+        PYTHON_VERSION,
+        "--no-sync",
+    ]
+    for command in (
+        ("ruff", "check", "."),
+        ("ruff", "format", "--check", "."),
+        ("mypy",),
+        ("python", "-m", "pytest"),
+    ):
+        _run([*installer_prefix, *command])
     _run(["uv", "build", "--python", PYTHON_VERSION, "--clear", "--no-sources"])
     _run(
         [
@@ -144,37 +108,27 @@ def main() -> int:
             str(INSTALLER_DISTRIBUTION),
         ],
     )
-    _run(
-        [
-            sys.executable,
-            "scripts/check_release_identity.py",
-            "--project",
-            "pyproject.toml",
-            *[item for artifact in _distribution_artifacts() for item in ("--artifact", artifact)],
-        ],
-    )
-    _run(
-        [
-            sys.executable,
-            "scripts/check_release_identity.py",
-            "--project",
+    for project, distribution in (
+        ("pyproject.toml", _distribution_artifacts()),
+        (
             str(INSTALLER_PROJECT / "pyproject.toml"),
-            *[
-                item
-                for artifact in _distribution_artifacts(INSTALLER_DISTRIBUTION)
-                for item in ("--artifact", artifact)
+            _distribution_artifacts(INSTALLER_DISTRIBUTION),
+        ),
+    ):
+        _run(
+            [
+                sys.executable,
+                "scripts/check_release_identity.py",
+                "--project",
+                project,
+                *[item for artifact in distribution for item in ("--artifact", artifact)],
             ],
-        ],
-    )
-    _uv_run(PYTHON_VERSION, "python", "-m", "twine", "check", *_distribution_artifacts())
-    _uv_run(
-        PYTHON_VERSION,
-        "python",
-        "-m",
-        "twine",
-        "check",
-        *_distribution_artifacts(INSTALLER_DISTRIBUTION),
-    )
+        )
+    for distribution in (
+        _distribution_artifacts(),
+        _distribution_artifacts(INSTALLER_DISTRIBUTION),
+    ):
+        _uv_run(PYTHON_VERSION, "python", "-m", "twine", "check", *distribution)
     sys.stdout.write("\nROI-H release qualification: PASSED\n")
     return 0
 

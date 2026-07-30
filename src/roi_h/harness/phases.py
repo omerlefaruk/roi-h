@@ -11,7 +11,6 @@ from typing import Any
 from roi_h.harness.atomicfs import atomic_write_json
 from roi_h.harness.domain import HandoffManifest, validate_phase_name
 
-_SAFE_DIR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")
 _STORED_ARTIFACT = re.compile(r"^art_[A-Za-z0-9_-]{8,128}--(.+)$")
 
 
@@ -143,33 +142,3 @@ def discover_handoffs(path: str | Path) -> list[tuple[HandoffManifest, Path]]:
         msg = f"no handoff packages found under {target}"
         raise FileNotFoundError(msg)
     return [read_handoff(child) for child in candidates]
-
-
-def copy_artifacts_to_run(
-    artifacts_root: Path,
-    *,
-    run_id: str,
-    files: list[Path],
-    overwrite: bool = True,
-) -> list[dict[str, Any]]:
-    """Copy handoff files into the run artifact root (flat names)."""
-    dest_dir = artifacts_root / run_id
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    copied: list[dict[str, Any]] = []
-    for src in files:
-        dest = dest_dir / src.name
-        if dest.exists() and not overwrite:
-            msg = f"artifact already exists: {dest}"
-            raise FileExistsError(msg)
-        shutil.copy2(src, dest)
-        copied.append({"name": src.name, "path": str(dest.resolve()), "bytes": dest.stat().st_size})
-    return copied
-
-
-def slug_dir_name(name: str) -> str:
-    """Filesystem-safe fragment for phase directories."""
-    validate_phase_name(name)
-    if not _SAFE_DIR.match(name):
-        msg = f"unsafe phase directory name: {name!r}"
-        raise ValueError(msg)
-    return name
