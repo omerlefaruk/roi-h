@@ -1,6 +1,6 @@
 """Package-shape and transaction-scenario checks for issue #14."""
 
-# ruff: noqa: PLR0913, PLR0917, S314, S603
+# ruff: noqa: PLR0913, PLR0915, PLR0917, S108, S314, S603
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import hashlib
 import inspect
 import io
 import json
+import os
 import subprocess
 import sys
 import tarfile
@@ -150,7 +151,7 @@ def test_package_shape_transaction_recovery_and_offline_rollback(tmp_path: Path)
         "unproved": [
             "actual Installer execution",
             "actual locked ROI-H payload",
-            "package signing and notarization",
+            "package notarization",
             "macOS 14 execution",
         ],
     }
@@ -161,7 +162,6 @@ def test_package_shape_transaction_recovery_and_offline_rollback(tmp_path: Path)
     assert package_evidence["path"] == str(package)
     assert package_evidence["format"] == "flat-product-pkg"
     assert package_evidence["signed"] is False
-    assert package_evidence["signing_identity"] is None
     assert package_evidence["signature"]["status"] == "unsigned"
     assert package_evidence["signature"]["confirmed"] is False
     assert package_evidence["notarized"] is False
@@ -304,7 +304,7 @@ def test_package_shape_transaction_recovery_and_offline_rollback(tmp_path: Path)
     assert archive_a.exists() and archive_b.exists()
 
 
-def test_rejects_output_overlap_and_blank_signing_identity(tmp_path: Path) -> None:
+def test_rejects_output_overlap(tmp_path: Path) -> None:
     cwd = tmp_path / "cwd"
     cwd.mkdir()
     roi_h_home = tmp_path / "customer" / ".roi-h"
@@ -344,21 +344,198 @@ def test_rejects_output_overlap_and_blank_signing_identity(tmp_path: Path) -> No
     assert "output package path overlaps managed data" in str(evidence["error"])
     assert not (roi_h_home / "forbidden.pkg").exists()
 
-    blank_signing = [
-        *_command(
-            tmp_path / "managed-signing-check",
-            tmp_path / "blank-signing.pkg",
-            roi_h_home,
-            archive_a,
-            identity_a,
-            archive_b,
-            identity_b,
-        ),
-        "--signing-identity",
-        "   ",
+
+@pytest.mark.skipif(
+    os.environ.get("ROI_H_RUN_ISSUE14_NATIVE") != "1",
+    reason="set ROI_H_RUN_ISSUE14_NATIVE=1 to execute the real unsigned native journey",
+)
+def test_unsigned_native_journey_from_unrelated_cwd(tmp_path: Path) -> None:
+    unrelated_cwd = tmp_path / "unrelated-native-cwd"
+    unrelated_cwd.mkdir()
+    roi_h_home = tmp_path / "existing-roi-h-home"
+    (roi_h_home / "projects").mkdir(parents=True)
+    (roi_h_home / "identity.bin").write_bytes(bytes(range(256)))
+    output_dir = Path(
+        os.environ.get("ROI_H_ISSUE14_OUTPUT_DIR", "/tmp/roi-h-issue14-unsigned-native-proof")
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    children_before = set(output_dir.iterdir())
+    browser_cache = Path.home() / "Library" / "Caches" / "ms-playwright"
+    wheel = Path(__file__).resolve().parents[2] / "dist" / "roi_h-0.1.3-py3-none-any.whl"
+    command = [
+        sys.executable,
+        "-m",
+        "roi_h.harness.macos_native_package_prototype",
+        "native-journey",
+        "--roi-h-home",
+        str(roi_h_home),
+        "--browser-cache",
+        str(browser_cache),
+        "--wheel",
+        str(wheel),
+        "--output-dir",
+        str(output_dir),
     ]
-    completed, evidence = _run(blank_signing, cwd)
-    assert completed.returncode == 1
-    assert evidence["error_type"] == "ValueError"
-    assert evidence["error"] == "signing identity must not be blank"
-    assert not (tmp_path / "blank-signing.pkg").exists()
+    completed: subprocess.CompletedProcess[str] | None = None
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=unrelated_cwd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=1800,
+        )
+    finally:
+        if completed is None or completed.returncode != 0:
+            for child in set(output_dir.iterdir()) - children_before:
+                result = child / "result.json"
+                if result.is_file():
+                    subprocess.run(
+                        [*command[:3], "cleanup", "--result", str(result)],
+                        cwd=unrelated_cwd,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        timeout=120,
+                    )
+    assert completed is not None
+    evidence = json.loads(completed.stdout)
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+    assert evidence["ok"] is True
+    assert evidence["mode"] == "native-journey"
+    assert evidence["unsigned"] is True
+    assert evidence["native_installer_executed"] is True
+    assert evidence["host"]["system"] == "Darwin"
+    assert evidence["host"]["machine"] == "arm64"
+    assert evidence["host"]["macos_version"] == "26.5"
+    artifact_dir = Path(evidence["artifact_dir"])
+    assert artifact_dir.parent == output_dir.resolve()
+    assert artifact_dir.name == evidence["journey_id"]
+    assert artifact_dir.stat().st_mode & 0o777 == 0o700
+
+    assert set(evidence["packages"]) == {"A", "B"}
+    for version, receipt in (
+        ("A", "com.roih.wayfinder.issue14.native.a"),
+        ("B", "com.roih.wayfinder.issue14.native.b"),
+    ):
+        package = evidence["packages"][version]
+        package_path = Path(package["path"])
+        assert package_path.is_file()
+        assert package["sha256"] == _identity(package_path)[1]
+        assert package["bytes"] == package_path.stat().st_size
+        assert package["receipt_id"] == receipt
+        assert package["unsigned"] is True
+        assert package["signature"]["status"] == "unsigned"
+        assert package["signature"]["check_returncode"] != 0
+        assert package["lifecycle_scripts"] is False
+        assert evidence["installs"][version]["returncode"] == 0
+        assert evidence["installs"][version]["without_sudo"] is True
+
+    assert set(evidence["browser_target_manifests"]) == {
+        "chromium-1228",
+        "chromium_headless_shell-1228",
+        "ffmpeg-1011",
+    }
+    for target, manifest in evidence["browser_target_manifests"].items():
+        assert manifest["entry_count"] > 0
+        assert len(manifest["sha256"]) == 64
+        artifact = json.loads(Path(manifest["artifact"]).read_text(encoding="utf-8"))
+        assert {key: artifact[key] for key in ("entry_count", "bytes", "sha256")} == {
+            key: manifest[key] for key in ("entry_count", "bytes", "sha256")
+        }, target
+    for version, manifest in evidence["runtime_manifests"].items():
+        artifact = json.loads(Path(manifest["artifact"]).read_text(encoding="utf-8"))
+        assert {
+            key: artifact["runtime_manifest"][key] for key in ("entry_count", "bytes", "sha256")
+        } == {key: manifest[key] for key in ("entry_count", "bytes", "sha256")}, version
+    for version, manifest in evidence["managed_root_manifests"].items():
+        artifact = json.loads(Path(manifest["artifact"]).read_text(encoding="utf-8"))
+        assert {key: artifact[key] for key in ("entry_count", "bytes", "sha256")} == {
+            key: manifest[key] for key in ("entry_count", "bytes", "sha256")
+        }, version
+        assert (
+            evidence["packages"][version]["expanded_verification"]["sha256"] == manifest["sha256"]
+        )
+    for verification in evidence["version_verifications"].values():
+        runtime = verification["runtime"]
+        assert runtime["python_version"] == "3.12.13"
+        assert runtime["versions"] == {
+            "roi-h": "0.1.3",
+            "playwright": "1.61.0",
+            "activegraph": "1.10.0",
+        }
+        assert verification["doctor"]["ok"] is True
+        assert verification["playwright"]["revision"] == "1228"
+        assert verification["playwright"]["evaluation_6_times_7_equals_42"] is True
+        assert set(verification["playwright"]["target_manifest_digests"]) == {
+            "chromium-1228",
+            "chromium_headless_shell-1228",
+            "ffmpeg-1011",
+        }
+
+    assert [event["event"] for event in evidence["events"]] == [
+        "activate_A",
+        "recover_activation_before_pointer",
+        "recover_activation_after_pointer",
+        "recover_activation_after_native_state",
+        "recover_activation_after_install_state",
+        "retained_A_tamper_rejected",
+        "offline_rollback_A",
+    ]
+    boundaries = evidence["update_recovery"]["activation_boundaries"]
+    assert {name: item["child_returncode"] for name, item in boundaries.items()} == {
+        "before_pointer": 75,
+        "after_pointer": 76,
+        "after_native_state": 77,
+        "after_install_state": 78,
+    }
+    assert boundaries["before_pointer"]["active"] == "A"
+    assert boundaries["before_pointer"]["convergence"] == "prior"
+    assert boundaries["after_pointer"]["active"] == "B"
+    assert boundaries["after_pointer"]["convergence"] == "desired"
+    assert not (Path(evidence["managed_root"]) / "activation-journal.json").exists()
+    assert evidence["tamper_rejection"]["rejected"] is True
+    assert evidence["tamper_rejection"]["tampered_code_executed"] is False
+    assert evidence["tamper_rejection"]["B_remained_active"] is True
+    assert evidence["rollback"]["offline_input_contract"] is True
+    assert evidence["rollback"]["package_source"] is False
+    assert evidence["rollback"]["archive_source"] is False
+    assert evidence["rollback"]["network_access_blocked"] is False
+    assert evidence["retained"]["exact"] is True
+    assert all(item["matched"] for item in evidence["retained"]["versions"].values())
+    assert all(item["matched"] for item in evidence["retained"]["browser_targets"].values())
+    assert evidence["roi_h_home"]["unchanged"] is True
+    assert evidence["roi_h_home"]["before"] == evidence["roi_h_home"]["after"]
+    assert evidence["cleanup"]["marker_matched"] is True
+    assert evidence["cleanup"]["root_absent"] is True
+    assert evidence["cleanup"]["errors"] == []
+    assert all(item["absent_after"] for item in evidence["cleanup"]["receipts"].values())
+    assert evidence["tracked_receipts"] == [
+        "com.roih.wayfinder.issue14.native.a",
+        "com.roih.wayfinder.issue14.native.b",
+    ]
+    assert not (Path.home() / "Library" / "Application Support" / "ROI-H").exists()
+    assert not (
+        Path.home() / "Library" / "Application Support" / ".roi-h-issue14-native.lock"
+    ).exists()
+    assert Path(evidence["result_path"]).is_file()
+    assert json.loads(Path(evidence["result_path"]).read_text(encoding="utf-8")) == evidence
+    assert evidence["limitations"] == [
+        "macOS 14 was not executed; this proof ran only on macOS 26.5",
+        "the production managed-root documentation/default conflicts with the issue #9 prototype root",
+        "Installer-process interruption was not tested and /usr/sbin/installer was not killed",
+        "A and B use identical ROI-H 0.1.3 bytes; cross-version compatibility was not tested",
+        "the host did not enforce network denial",
+    ]
+
+    explicit_cleanup = subprocess.run(
+        [*command[:3], "cleanup", "--result", evidence["result_path"]],
+        cwd=unrelated_cwd,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert explicit_cleanup.returncode == 0, explicit_cleanup.stderr or explicit_cleanup.stdout
+    assert json.loads(explicit_cleanup.stdout)["cleanup"]["root_absent"] is True
