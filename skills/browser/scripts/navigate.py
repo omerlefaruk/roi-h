@@ -5,6 +5,15 @@ TOOL_ID = "navigate"
 DESCRIPTION = "Navigate the browser to a URL."
 DETERMINISTIC = False
 REQUIRES_APPROVAL = False
+TOOL_EFFECT = 'write'
+IDEMPOTENCY = 'reconcile'
+ALLOW_IN_PROD = True
+TIMEOUT_SECONDS = 180.0
+SECRET_NAMES = ()
+NETWORK_HOSTS = ('*',)
+FILESYSTEM_ROOTS = ()
+
+
 class Input(BaseModel):
     url: str = Field(min_length=1)
     headless: bool | None = Field(default=None, description="Override session headed mode on first launch")

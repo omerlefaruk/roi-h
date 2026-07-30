@@ -7,6 +7,14 @@ DESCRIPTION = "Capture a PNG screenshot of the current page; returns path."
 DETERMINISTIC = False
 REQUIRES_APPROVAL = False
 FILESYSTEM_ROOTS = ("run:work:read-write", "run:output:read-write", "run:tmp:read-write")
+TOOL_EFFECT = 'write'
+IDEMPOTENCY = 'reconcile'
+ALLOW_IN_PROD = True
+TIMEOUT_SECONDS = 180.0
+SECRET_NAMES = ()
+NETWORK_HOSTS = ('*',)
+
+
 class Input(BaseModel):
     path: str = Field(default="screenshot.png")
     full_page: bool = True

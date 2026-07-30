@@ -3,6 +3,15 @@ import json
 import urllib.request
 from pydantic import BaseModel, Field
 TOOL_ID="post"; DESCRIPTION="HTTP POST JSON body."; DETERMINISTIC=False; REQUIRES_APPROVAL=False
+TOOL_EFFECT = 'write'
+IDEMPOTENCY = 'reconcile'
+ALLOW_IN_PROD = True
+TIMEOUT_SECONDS = 120.0
+SECRET_NAMES = ()
+NETWORK_HOSTS = ('*',)
+FILESYSTEM_ROOTS = ()
+
+
 class Input(BaseModel):
     url: str
     json_body: dict | list | None = None

@@ -5,6 +5,15 @@ TOOL_ID = "click"
 DESCRIPTION = "Click by snapshot ref, visible text, or CSS selector."
 DETERMINISTIC = False
 REQUIRES_APPROVAL = False
+TOOL_EFFECT = 'write'
+IDEMPOTENCY = 'reconcile'
+ALLOW_IN_PROD = True
+TIMEOUT_SECONDS = 180.0
+SECRET_NAMES = ()
+NETWORK_HOSTS = ('*',)
+FILESYSTEM_ROOTS = ()
+
+
 class Input(BaseModel):
     ref: str = ""
     selector: str = ""

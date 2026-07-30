@@ -5,6 +5,15 @@ TOOL_ID="record"
 DESCRIPTION="Record post-automation feedback for codebase/skill improvement."
 DETERMINISTIC=True
 REQUIRES_APPROVAL=False
+TOOL_EFFECT = 'write'
+IDEMPOTENCY = 'reconcile'
+ALLOW_IN_PROD = True
+TIMEOUT_SECONDS = 120.0
+SECRET_NAMES = ()
+NETWORK_HOSTS = ()
+FILESYSTEM_ROOTS = ()
+
+
 class Input(BaseModel):
     automation: str = ""
     version: str = ""

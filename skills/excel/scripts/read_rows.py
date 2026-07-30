@@ -4,6 +4,14 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 TOOL_ID="read_rows"; DESCRIPTION="Read rows from xlsx or csv as list of dicts."; DETERMINISTIC=True; REQUIRES_APPROVAL=False
 FILESYSTEM_ROOTS=("project:reference:read","run:input:read","run:work:read-write","run:output:read-write","artifact:read","automation:read")
+TOOL_EFFECT = 'read'
+IDEMPOTENCY = 'none'
+ALLOW_IN_PROD = True
+TIMEOUT_SECONDS = 120.0
+SECRET_NAMES = ()
+NETWORK_HOSTS = ()
+
+
 class Input(BaseModel):
     path: str
     sheet: str = ""

@@ -7,6 +7,15 @@ import urllib.request
 from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 TOOL_ID="get"; DESCRIPTION="HTTP GET; return text or JSON."; DETERMINISTIC=False; REQUIRES_APPROVAL=False
+TOOL_EFFECT = 'read'
+IDEMPOTENCY = 'none'
+ALLOW_IN_PROD = True
+TIMEOUT_SECONDS = 120.0
+SECRET_NAMES = ()
+NETWORK_HOSTS = ('*',)
+FILESYSTEM_ROOTS = ()
+
+
 class Input(BaseModel):
     url: str
     headers: dict[str, str] = Field(default_factory=dict)

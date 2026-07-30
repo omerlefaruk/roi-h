@@ -5,6 +5,15 @@ TOOL_ID = "press"
 DESCRIPTION = "Press a keyboard key (Enter, Tab, Escape, …)."
 DETERMINISTIC = False
 REQUIRES_APPROVAL = False
+TOOL_EFFECT = 'write'
+IDEMPOTENCY = 'reconcile'
+ALLOW_IN_PROD = True
+TIMEOUT_SECONDS = 180.0
+SECRET_NAMES = ()
+NETWORK_HOSTS = ('*',)
+FILESYSTEM_ROOTS = ()
+
+
 class Input(BaseModel):
     key: str
 class Output(BaseModel):

@@ -2,6 +2,15 @@ from __future__ import annotations
 import subprocess
 from pydantic import BaseModel, Field
 TOOL_ID="run"; DESCRIPTION="Run a shell command (approval required)."; DETERMINISTIC=False; REQUIRES_APPROVAL=True
+TOOL_EFFECT = 'destructive'
+IDEMPOTENCY = 'reconcile'
+ALLOW_IN_PROD = False
+TIMEOUT_SECONDS = 3600.0
+SECRET_NAMES = ()
+NETWORK_HOSTS = ()
+FILESYSTEM_ROOTS = ()
+
+
 class Input(BaseModel):
     command: str
     cwd: str = ""
