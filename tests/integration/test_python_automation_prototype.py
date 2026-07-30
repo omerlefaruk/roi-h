@@ -172,9 +172,9 @@ def test_verified_python_entrypoint_restarts_without_replaying_write(  # noqa: P
         "runtime": runtime_manifest(),
         "entrypoint": "automation.py:run",
         "phases": [
-            {"name": "write", "require_artifacts": ["count.txt"]},
-            {"name": "verify"},
-            {"name": "deny"},
+            {"name": "write", "role": "work", "require_artifacts": ["count.txt"]},
+            {"name": "verify", "role": "verify"},
+            {"name": "deny", "role": "work"},
         ],
         "operations": [
             operation_manifest_entry(publisher, "counter.increment"),
