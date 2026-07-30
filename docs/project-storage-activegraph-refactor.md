@@ -66,9 +66,15 @@ maintaining a second detailed copy.
 ## 3. Executive Decisions
 
 1. **ActiveGraph remains the sole authority for durable run history.**
-   Run lifecycle, phases, invocations, authority decisions, approvals, outcomes,
-   artifacts, feedback tied to a run, reconciliation results, and retention decisions
-   are ActiveGraph events or typed objects derived from those events.
+   ROI-H uses the public ActiveGraph runtime directly for events, run registration,
+   authority, approvals, evidence, replay, lineage, forks, behaviors, budgets, snapshots,
+   and projections. ROI-H retains only product objects, customer-owned bytes, isolated
+   effects, and version-locked compatibility seams where ActiveGraph has no public API.
+
+   Tool request and response events are the canonical execution evidence. A step becomes
+   an operator read projection over those events and its invocation. Durable `rpa.step`
+   copies remain only until causal links, event-first recovery, bounded projection, and
+   legacy-read compatibility pass.
 
 2. **ROI-H keeps only a narrow diagnostic fallback outside ActiveGraph.**
    Diagnostic records exist for failures that ActiveGraph cannot reliably record, such

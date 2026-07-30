@@ -1,6 +1,8 @@
 # External AI CLI Operator Guide
 
-ROI-H has one external AI interface: the installed `roi-h` command.
+ROI-H has one external AI contract. The installed `roi-h` command is the universal
+transport. A native bridge can expose the same live operation IDs and schemas, but it
+must not add product behavior or policy.
 
 Codex, Claude, Gemini, and generic shell agents use the same JSON contract. They do not
 need source access. They must not read the ActiveGraph SQLite file.
@@ -133,3 +135,29 @@ The second human command uses a hidden terminal prompt.
 
 The operation manifest is the authority for effects, approvals, idempotency, secret
 inputs, pagination, and timeouts.
+
+## Skill contract
+
+A `SKILL.md` file contains only guidance that the live manifest cannot express:
+
+```markdown
+---
+name: skill-name
+description: When and why to use this skill.
+---
+
+One short domain procedure, when required.
+```
+
+It must not copy operation schemas, command layouts, safety rules, model names, or
+orchestration. Each executable tool module defines strict Pydantic `Input` and `Output`
+models, `run(args: Input) -> Output`, and its effect, idempotency, approval, production,
+timeout, secret, network, and filesystem metadata. Missing custom-tool security metadata
+fails closed. ROI-H inspects custom modules in a bounded worker and never imports them in
+the parent process.
+
+The current development worker is process isolation, not an operating-system sandbox.
+Custom skill Python is trusted local code; declared network and filesystem metadata guides
+the broker but cannot confine arbitrary Python. Production recipe replacement stays
+blocked until a verified, effect-restricted runner enforces those capabilities at the
+process boundary.

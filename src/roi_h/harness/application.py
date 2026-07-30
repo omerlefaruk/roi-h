@@ -93,11 +93,10 @@ class RunSession:
         graph = Graph(run_id=run_id)
         RunStorage(workspace).prepare(graph.run_id)
         invoker = IsolatedSkillInvoker(catalog, workspace)
-        behaviors = build_invocation_behaviors(catalog, workspace, invoker)
         runtime = ROIHRuntime(
             graph,
             persist_to=str(workspace.db),
-            behaviors=behaviors,
+            behaviors=build_invocation_behaviors(catalog, workspace, invoker),
             tools=tools,
             budget=limits,
         )
@@ -136,11 +135,10 @@ class RunSession:
         tools = catalog.to_activegraph_tools()
         limits = spec.to_activegraph_limits() or None
         invoker = IsolatedSkillInvoker(catalog, workspace)
-        behaviors = build_invocation_behaviors(catalog, workspace, invoker)
         runtime = ROIHRuntime.load(
             str(workspace.db),
             run_id=run_id,
-            behaviors=behaviors,
+            behaviors=build_invocation_behaviors(catalog, workspace, invoker),
             tools=tools,
             budget=limits,
         )

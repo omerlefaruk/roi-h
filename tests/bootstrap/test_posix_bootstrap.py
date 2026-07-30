@@ -59,7 +59,7 @@ fi
     ("managed", "expected_operation"),
     [(False, "install"), (True, "update")],
 )
-def test_posix_bootstrap_pins_tools_and_forwards_staging_release(
+def test_posix_bootstrap_pins_tools_and_forwards_staging_release(  # noqa: PLR0915
     tmp_path: Path,
     *,
     managed: bool,
@@ -71,6 +71,7 @@ def test_posix_bootstrap_pins_tools_and_forwards_staging_release(
     bin_root = tmp_path / "bin-root"
     data_home = tmp_path / "data-home"
     command_log = tmp_path / "commands.log"
+    launch_home = tmp_path / "launch-home.txt"
     fake_uv_source = tmp_path / "fake-uv"
     fake_installer_source = tmp_path / "fake-installer"
     fake_bundle_source = tmp_path / "release-bundle.tar.gz"
@@ -126,7 +127,7 @@ for wheel in "$release_root"/*.whl; do
 done
 [ "$wheel_found" = true ]
 mkdir -p "$FAKE_INSTALL_ROOT/current/bin"
-printf '#!/bin/sh\nexit 0\n' > "$FAKE_INSTALL_ROOT/current/bin/roi-h"
+printf '#!/bin/sh\nprintf "%%s" "${ROI_H_HOME-}" > "$FAKE_LAUNCH_HOME"\n' > "$FAKE_INSTALL_ROOT/current/bin/roi-h"
 chmod +x "$FAKE_INSTALL_ROOT/current/bin/roi-h"
 printf '{"changed":true}\n'
 """,
@@ -198,6 +199,7 @@ printf '%s  %s\n' "$digest" "$last"
         "ROI_H_RELEASE_BUNDLE_URL": "https://staging.example/release-bundle.tar.gz",
         "ROI_H_RELEASE_BUNDLE_SHA256": bundle_sha256,
         "FAKE_COMMAND_LOG": str(command_log),
+        "FAKE_LAUNCH_HOME": str(launch_home),
         "FAKE_UV_SOURCE": str(fake_uv_source),
         "FAKE_INSTALLER_SOURCE": str(fake_installer_source),
         "FAKE_INSTALL_ROOT": str(install_root),
@@ -230,8 +232,17 @@ printf '%s  %s\n' "$digest" "$last"
     assert "--output json" in log
     assert f"installer-home:{data_home}" in log
     launcher = bin_root / "roi-h"
-    assert launcher.is_symlink()
-    assert launcher.resolve() == install_root / "current" / "bin" / "roi-h"
+    assert launcher.is_file()
+    assert not launcher.is_symlink()
+    launcher_text = launcher.read_text(encoding="utf-8")
+    assert "PLAYWRIGHT_BROWSERS_PATH" in launcher_text
+    assert "PLAYWRIGHT_SKIP_BROWSER_GC=1" in launcher_text
+    launch_environment = {**os.environ, "FAKE_LAUNCH_HOME": str(launch_home)}
+    launch_environment.pop("ROI_H_HOME", None)
+    assert (
+        subprocess.run([launcher], env=launch_environment, check=False).returncode == 0  # noqa: S603
+    )
+    assert launch_home.read_text(encoding="utf-8") == str(data_home)
     updater = install_root / "installer" / "update.sh"
     assert updater.stat().st_mode & 0o111
     assert (

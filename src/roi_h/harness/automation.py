@@ -69,7 +69,7 @@ def publish_manifest(
                 msg = f"project skill not found for snapshot: {src}"
                 raise FileNotFoundError(msg)
             dest = skills_snapshot / skill
-            shutil.copytree(src, dest)
+            shutil.copytree(src, dest, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
             copied.append(skill)
 
         resolved_recipe = _resolve_recipe(
@@ -103,7 +103,11 @@ def publish_manifest(
                 if not source.is_dir():
                     msg = f"referenced skill not found for snapshot: {skill}"
                     raise FileNotFoundError(msg)
-                shutil.copytree(source, skills_snapshot / skill)
+                shutil.copytree(
+                    source,
+                    skills_snapshot / skill,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+                )
                 copied.append(skill)
         package_catalog = load_skills(
             default_skills_root(),

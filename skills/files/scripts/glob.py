@@ -3,6 +3,14 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 TOOL_ID="glob"; DESCRIPTION="List files matching a glob pattern."; DETERMINISTIC=True; REQUIRES_APPROVAL=False
 FILESYSTEM_ROOTS=("project:reference:read","run:input:read","run:work:read-write","run:output:read-write","artifact:read","automation:read")
+TOOL_EFFECT = 'read'
+IDEMPOTENCY = 'none'
+ALLOW_IN_PROD = True
+TIMEOUT_SECONDS = 120.0
+SECRET_NAMES = ()
+NETWORK_HOSTS = ()
+
+
 class Input(BaseModel):
     pattern: str
     root: str = "."

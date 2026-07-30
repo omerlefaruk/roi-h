@@ -10,7 +10,7 @@ production use.
 The main path is:
 
 ```text
-AI-assisted discovery → approved execution → evidence → immutable automation → audited production run
+explore → solve → verify → immutable automation → audited production run
 ```
 
 ROI-H is built on `activegraph==1.10.0`. ActiveGraph owns lifecycle, authority decisions,
@@ -28,6 +28,9 @@ Capabilities live under `skills/`. Each script exports `TOOL_ID`, `Input`, `Outp
 `run`. A request becomes a durable `rpa.invocation`; ActiveGraph behaviors authorize and
 execute it, emit canonical `tool.requested` / `tool.responded` events, and materialize the
 terminal `rpa.step`.
+
+External AI clients discover and execute the same typed operation catalog. ROI-H does
+not embed a model provider or a second orchestration loop.
 
 The production path is deliberately linear:
 
@@ -60,11 +63,6 @@ external-AI interface is documented in the
 from `roi-h agent describe` is the machine-contract authority. The retained
 [primary-source research](docs/research/external-ai-cli-primary-research.md) records the
 security basis for this interface.
-The release, installer, update, and rollback implementation plan is in
-[`docs/release-implementation-plan.md`](docs/release-implementation-plan.md), with its
-handoff in
-[`docs/handoffs/release-implementation-handoff.md`](docs/handoffs/release-implementation-handoff.md).
-
 Published versions are immutable, digest-verified snapshots. `ship` is the only CLI
 publishing journey; `run` executes its straight-line recipe. Advanced ActiveGraph
 operations remain available through `RunSession.runtime` instead of mirrored ROI-H
@@ -102,7 +100,11 @@ depend on GitHub Actions; see
 [`docs/distribution-and-updates.md`](docs/distribution-and-updates.md) for the local
 publish procedure and external automation options.
 
-Build one self-contained macOS ARM64 candidate from the locked Python 3.12 environment:
+The shell and PowerShell release bundles below are temporary compatibility paths while
+native macOS package and Windows MSIX delivery complete their acceptance gates.
+
+Build one self-contained macOS ARM64 compatibility candidate from the locked Python 3.12
+environment:
 
 ```shell
 uv run python scripts/prepare_release_candidate.py \

@@ -226,10 +226,34 @@ active_cli=$install_root/current/bin/roi-h
 [ -x "$active_cli" ] || fail "The active ROI-H command is not executable."
 mkdir -p "$bin_root"
 launcher=$bin_root/roi-h
-if [ -e "$launcher" ] && [ ! -L "$launcher" ]; then
+if [ -e "$launcher" ] && [ ! -L "$launcher" ] && \
+    ! grep -q '^# ROI-H managed launcher$' "$launcher"; then
     fail "The ROI-H launcher path contains a file that is not managed by ROI-H."
 fi
-ln -sfn "$active_cli" "$launcher"
+root_pointer=$bin_root/.roi-h-install-root
+data_pointer=$bin_root/.roi-h-data-home
+printf '%s\n' "$install_root" > "$root_pointer.tmp"
+printf '%s\n' "$data_home" > "$data_pointer.tmp"
+mv -f "$root_pointer.tmp" "$root_pointer"
+mv -f "$data_pointer.tmp" "$data_pointer"
+temporary_launcher=$bin_root/.roi-h-launcher.tmp
+cat > "$temporary_launcher" <<'ROI_H_LAUNCHER'
+#!/bin/sh
+# ROI-H managed launcher
+set -eu
+launcher_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+IFS= read -r install_root < "$launcher_root/.roi-h-install-root"
+IFS= read -r data_home < "$launcher_root/.roi-h-data-home"
+export ROI_H_INSTALL_ROOT="$install_root"
+if [ -z "${ROI_H_HOME:-}" ]; then
+    export ROI_H_HOME="$data_home"
+fi
+export PLAYWRIGHT_BROWSERS_PATH="$install_root/browsers"
+export PLAYWRIGHT_SKIP_BROWSER_GC=1
+exec "$install_root/current/bin/roi-h" "$@"
+ROI_H_LAUNCHER
+chmod 0755 "$temporary_launcher"
+mv -f "$temporary_launcher" "$launcher"
 
 case ":${PATH:-}:" in
     *":$bin_root:"*)

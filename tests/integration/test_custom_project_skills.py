@@ -26,9 +26,12 @@ def _roi_h(
 
 
 _FILTER_SCRIPT = """\
+import atexit
 import os
 
 from pydantic import BaseModel, Field
+
+atexit.register(lambda: os.write(1, b'late output'))
 
 TOOL_ID = "filter_high"
 DESCRIPTION = "Filter amounts above a threshold"
@@ -109,7 +112,7 @@ def test_custom_define_invoke_with_auto_approve(tmp_path: Path) -> None:
         "finance",
         "filter_high",
         "--args",
-        '{"amounts":[10,2000,50,3000],"threshold":"1000"}',
+        '{"amounts":[10,2000,50,3000],"threshold":1000}',
         "--auto-approve",
         cwd=tmp_path,
     )

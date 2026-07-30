@@ -11,6 +11,15 @@ DETERMINISTIC = True
 REQUIRES_APPROVAL = False
 
 
+TOOL_EFFECT = 'read'
+IDEMPOTENCY = 'none'
+ALLOW_IN_PROD = True
+TIMEOUT_SECONDS = 120.0
+SECRET_NAMES = ()
+NETWORK_HOSTS = ()
+FILESYSTEM_ROOTS = ()
+
+
 class Input(BaseModel):
     limit: int = Field(default=20, ge=1, le=500)
 

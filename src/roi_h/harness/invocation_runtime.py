@@ -12,11 +12,9 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import time
 from datetime import UTC, datetime
 from decimal import Decimal
-from pathlib import Path
 from typing import Any, cast
 
 from activegraph import Behavior, Event, Runtime
@@ -51,6 +49,7 @@ from roi_h.harness.secrets import (
 )
 from roi_h.harness.worker import WORKER_PROTOCOL_LIMIT
 from roi_h.harness.workspace import Workspace
+from roi_h.installation import managed_browser_root
 
 _APPROVAL_BEHAVIOR = "roi_h.request_invocation_approval"
 _EXECUTE_BEHAVIOR = "roi_h.execute_invocation"
@@ -58,6 +57,15 @@ _EXECUTE_BEHAVIOR = "roi_h.execute_invocation"
 
 class ToolPolicyError(RuntimeError):
     """Raised when an invocation violates the published execution policy."""
+
+
+class SkillWorkerError(RuntimeError):
+    """Raised with the isolated worker stage that failed."""
+
+    def __init__(self, message: str, *, stage: str) -> None:
+        """Store the failed worker stage."""
+        super().__init__(message)
+        self.stage = stage
 
 
 class IsolatedSkillInvoker:
@@ -110,6 +118,15 @@ class IsolatedSkillInvoker:
                 code,
                 message,
                 payload_extras={"tool": skill_tool.name},
+            ) from exc
+        except SkillWorkerError as exc:
+            reason = "tool.invalid_output" if exc.stage == "output" else "tool.invalid_input"
+            if exc.stage not in {"contract", "input", "output"}:
+                reason = "tool.execution_error"
+            raise ToolError(
+                reason,
+                str(exc),
+                payload_extras={"tool": skill_tool.name, "stage": exc.stage},
             ) from exc
         except ToolError:
             raise
@@ -523,41 +540,43 @@ def _run_worker(
         run_id=run_id,
         idempotency_key=idempotency_key,
     )
-    with tempfile.TemporaryDirectory(prefix="worker-", dir=paths.tmp) as response_dir:
-        response_path = Path(response_dir) / "response.json"
-        request = json.dumps(
-            {
-                "script": str(skill_tool.script_path),
-                "args": payload,
-                "response_path": str(response_path),
-            }
-        )
-        completed = subprocess.run(
-            [sys.executable, "-m", "roi_h.harness.worker"],
-            input=request,
-            text=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-            cwd=paths.work,
-            env=env,
-            timeout=skill_tool.timeout_seconds,
-        )
-        if not response_path.is_file():
-            msg = f"isolated worker returned no response (exit={completed.returncode})"
-            raise RuntimeError(msg)
-        with response_path.open(encoding="utf-8") as response_file:
-            response_text = response_file.read(WORKER_PROTOCOL_LIMIT + 1)
-    if len(response_text) > WORKER_PROTOCOL_LIMIT:
+    request = json.dumps(
+        {
+            "operation": "invoke",
+            "script": str(skill_tool.script_path),
+            "skill_root": str(skill_tool.script_path.parent.parent),
+            "expected_sha256": skill_tool.script_sha256,
+            "expected_tree_sha256": skill_tool.skill_tree_sha256,
+            "reject_bytecode": skill_tool.reject_bytecode,
+            "args": payload,
+        }
+    )
+    completed = subprocess.run(
+        [sys.executable, "-m", "roi_h.harness.worker"],
+        input=request,
+        text=True,
+        capture_output=True,
+        check=False,
+        cwd=paths.work,
+        env=env,
+        timeout=skill_tool.timeout_seconds,
+    )
+    if len(completed.stdout) > WORKER_PROTOCOL_LIMIT:
         msg = f"isolated worker response is too large: {skill_tool.name}"
         raise RuntimeError(msg)
     try:
-        response = json.loads(response_text)
+        response = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
         msg = f"isolated worker returned invalid JSON (exit={completed.returncode})"
         raise RuntimeError(msg) from exc
+    if bool(response.get("ok")) != (completed.returncode == 0):
+        msg = f"isolated worker response does not match exit {completed.returncode}"
+        raise RuntimeError(msg)
     if not response.get("ok"):
-        raise RuntimeError(str(response.get("error") or "isolated worker failed"))
+        raise SkillWorkerError(
+            str(response.get("error") or "isolated worker failed"),
+            stage=str(response.get("stage") or "unknown"),
+        )
     output = response.get("output")
     if not isinstance(output, dict):
         msg = f"{skill_tool.name} output must be an object"
@@ -576,6 +595,8 @@ def _worker_environment(
     paths = RunStorage(workspace).prepare(run_id)
     env = isolated_process_environment()
     browser_environment = {
+        "PLAYWRIGHT_BROWSERS_PATH",
+        "PLAYWRIGHT_SKIP_BROWSER_GC",
         "ROI_H_BROWSER",
         "ROI_H_BROWSER_HEADED",
         "ROI_H_BROWSER_SLOW_MO",
@@ -584,6 +605,8 @@ def _worker_environment(
     env.update(
         {key: value for key, value in os.environ.items() if key.upper() in browser_environment}
     )
+    env.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(managed_browser_root()))
+    env.setdefault("PLAYWRIGHT_SKIP_BROWSER_GC", "1")
     env.update(
         {
             "ROI_H_HOME": str(workspace.root),
@@ -719,6 +742,8 @@ def _failure_from_exception(exc: Exception) -> ExecutionFailure:
         )
     if isinstance(exc, ToolPolicyError):
         kind = "approval"
+    elif isinstance(exc, SkillWorkerError):
+        kind = "validation" if exc.stage in {"contract", "input", "output"} else "internal"
     elif isinstance(exc, (TypeError, ValueError, KeyError)):
         kind = "validation"
     elif isinstance(exc, TimeoutError):
@@ -730,6 +755,7 @@ def _failure_from_exception(exc: Exception) -> ExecutionFailure:
         message=f"{type(exc).__name__}: {exc}",
         exception_type=type(exc).__name__,
         retryable=isinstance(exc, TimeoutError),
+        details={"stage": exc.stage} if isinstance(exc, SkillWorkerError) else {},
     )
 
 

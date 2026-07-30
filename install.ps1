@@ -20,10 +20,15 @@ function Stop-Install {
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
     Stop-Install "This bootstrap requires Windows."
 }
-$operatingSystemArchitecture = (
-    [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+$operatingSystemArchitecture = [Environment]::GetEnvironmentVariable(
+    "PROCESSOR_ARCHITEW6432"
 )
-if ($operatingSystemArchitecture -ne "X64") {
+if ([string]::IsNullOrWhiteSpace($operatingSystemArchitecture)) {
+    $operatingSystemArchitecture = [Environment]::GetEnvironmentVariable(
+        "PROCESSOR_ARCHITECTURE"
+    )
+}
+if ($operatingSystemArchitecture -ne "AMD64") {
     Stop-Install "This release supports Windows x86-64 only."
 }
 
@@ -280,6 +285,8 @@ try {
 setlocal
 for %%I in ("%~dp0..") do set "ROI_H_INSTALL_ROOT=%%~fI"
 if not defined ROI_H_HOME set "ROI_H_HOME=$launcherDataHome"
+set "PLAYWRIGHT_BROWSERS_PATH=%ROI_H_INSTALL_ROOT%\browsers"
+set "PLAYWRIGHT_SKIP_BROWSER_GC=1"
 set /p "ROI_H_ACTIVE_VERSION="<"%ROI_H_INSTALL_ROOT%\current"
 if not defined ROI_H_ACTIVE_VERSION (
   1>&2 echo ROI-H failed: the active version pointer is empty.

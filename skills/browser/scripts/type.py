@@ -5,6 +5,15 @@ TOOL_ID = "type"
 DESCRIPTION = "Type text into a field by label/ref/selector (appends; use fill to replace)."
 DETERMINISTIC = False
 REQUIRES_APPROVAL = False
+TOOL_EFFECT = 'write'
+IDEMPOTENCY = 'reconcile'
+ALLOW_IN_PROD = True
+TIMEOUT_SECONDS = 180.0
+SECRET_NAMES = ()
+NETWORK_HOSTS = ('*',)
+FILESYSTEM_ROOTS = ()
+
+
 class Input(BaseModel):
     text: str
     label: str = ""

@@ -1,4 +1,8 @@
+import os
+import subprocess
 from pathlib import Path
+
+import pytest
 
 
 def test_powershell_bootstrap_matches_the_pinned_install_contract() -> None:
@@ -20,6 +24,9 @@ def test_powershell_bootstrap_matches_the_pinned_install_contract() -> None:
     assert "$env:ROI_H_RELEASE_BUNDLE_URL" in script
     assert "$env:ROI_H_RELEASE_BUNDLE_SHA256" in script
     assert '"This release supports Windows x86-64 only."' in script
+    assert "[Runtime.InteropServices.RuntimeInformation]::OSArchitecture" not in script
+    assert '"PROCESSOR_ARCHITECTURE"' in script
+    assert '"PROCESSOR_ARCHITEW6432"' in script
     assert "https://astral.sh/uv/$uvVersion/install.ps1" in script
     assert "Get-FileHash -Algorithm SHA256" in script
     assert "[ScriptBlock]::Create(" in script
@@ -44,6 +51,8 @@ def test_powershell_bootstrap_matches_the_pinned_install_contract() -> None:
     assert '"versions\\" + $installState.active_version' in script
     assert 'set /p "ROI_H_ACTIVE_VERSION="<"%ROI_H_INSTALL_ROOT%\\current"' in script
     assert '"roi-h.cmd"' in script
+    assert 'set "PLAYWRIGHT_BROWSERS_PATH=%ROI_H_INSTALL_ROOT%\\browsers"' in script
+    assert 'set "PLAYWRIGHT_SKIP_BROWSER_GC=1"' in script
     assert '"installer\\update.ps1"' in script
     assert '"https://raw.githubusercontent.com/omerlefaruk/roi-h/main/install.ps1"' in script
     assert '[Environment]::SetEnvironmentVariable("Path"' in script
@@ -54,3 +63,41 @@ def test_powershell_bootstrap_disables_strict_mode_for_uv() -> None:
 
     assert "Set-StrictMode -Off" in script
     assert "& $uvInstallerScript" in script
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell is only available on Windows")
+def test_powershell_bootstrap_runs_in_windows_powershell() -> None:
+    script_path = Path(__file__).parents[2] / "install.ps1"
+    windows_powershell = (
+        Path(os.environ["SYSTEMROOT"])
+        / "System32"
+        / "WindowsPowerShell"
+        / "v1.0"
+        / "powershell.exe"
+    )
+    environment = {
+        **os.environ,
+        "ROI_H_RELEASE_BUNDLE_URL": "not-a-url",
+    }
+    environment.pop("ROI_H_INSTALLER_VERSION", None)
+    environment.pop("ROI_H_RELEASE_BUNDLE_SHA256", None)
+
+    completed = subprocess.run(  # noqa: S603 - fixed Windows PowerShell executable
+        [
+            str(windows_powershell),
+            "-NoProfile",
+            "-NonInteractive",
+            "-File",
+            str(script_path),
+        ],
+        cwd=script_path.parent,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    output = completed.stdout + completed.stderr
+    assert completed.returncode != 0
+    assert "ROI_H_RELEASE_BUNDLE_URL must use HTTPS." in output
+    assert "OSArchitecture" not in output
