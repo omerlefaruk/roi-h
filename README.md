@@ -45,9 +45,10 @@ roi-h rpa env set prod
 roi-h rpa run job
 ```
 
-The built-in skills are `browser`, `files`, `excel`, `http`, `pdf`, `shell`, and
-`feedback`. Tools execute in isolated subprocesses with run-scoped paths and only
-declared secrets. Interrupted writes become `outcome_unknown` and require reconciliation.
+The built-in skills are `browser`, `files`, `excel`, and `pdf`. Tools execute in
+isolated subprocesses with run-scoped paths and only declared secrets. Interrupted writes
+become `outcome_unknown` and require reconciliation. Generic HTTP, shell, and feedback
+helpers are project or user skills only when a named workflow needs them.
 
 ROI-H stores user-owned state under `~/.roi-h` by default. Reusable custom skills live
 under `~/.roi-h/skills`; project skills, automation packages, artifacts, databases,

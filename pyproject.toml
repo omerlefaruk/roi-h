@@ -15,6 +15,7 @@ dependencies = [
   "openpyxl>=3.1.5",
   "playwright==1.61.0",
   "pydantic==2.13.4",
+  "pypdf>=6.9.2",
 ]
 
 [project.scripts]

@@ -34,7 +34,18 @@ This workflow uses the current browser, files, Excel, PDF, approval, artifact, s
 run capabilities. It gives a new operator one clear result to understand.
 
 Connector skills should be added only when they support this workflow or another named
-customer workflow. The generic core should stay small.
+customer workflow. The generic core stays limited to these helpers:
+
+- browser navigation, page snapshots, form fill, click, download, and session stop;
+- file SHA-256 and byte-count verification;
+- PDF text extraction; and
+- Excel workbook write and read-back, including the required sheet name.
+
+Page snapshots are for development exploration and are denied in production. Generic
+HTTP, shell, feedback, browser screenshot/type/press/select/status, and file
+read/write/copy/glob helpers stay outside core. The accepted proof workflow in issue #10
+does not call them; direct HTTP, shell, and arbitrary subprocess access are explicitly
+denied in production.
 
 ## Success measures
 

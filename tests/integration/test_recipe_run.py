@@ -403,6 +403,7 @@ def test_cli_ship_then_run_dry_and_live(tmp_path: Path) -> None:
     live_payload = json.loads(live.stdout)
     assert live_payload["ok"] is True
     assert live_payload["step_count"] >= 1
+    assert live_payload["next"] == {"status": "roi-h rpa status --run-id live1"}
 
 
 def test_recipe_treats_structured_tool_ok_false_as_failure(tmp_path: Path) -> None:
@@ -486,7 +487,12 @@ def test_run_from_handoff_skips_seeded_phase(tmp_path: Path) -> None:
             RecipePhase(
                 name="b",
                 steps=[
-                    RecipeStep(id="snap", skill="browser", tool="snapshot", args={}),
+                    RecipeStep(
+                        id="stop",
+                        skill="browser",
+                        tool="session_stop",
+                        args={},
+                    ),
                 ],
             ),
         ],

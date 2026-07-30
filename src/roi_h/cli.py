@@ -671,7 +671,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--feedback",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="Automatic feedback.record policy (default: on in dev, off in prod)",
+        help="Run feedback policy (default: on in dev, off in prod)",
     )
     run_cmd.set_defaults(
         handler=_cmd_run,

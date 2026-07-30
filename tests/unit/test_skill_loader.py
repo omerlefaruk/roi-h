@@ -1,9 +1,11 @@
 """Unit tests for skills discovery."""
 
+import runpy
 from pathlib import Path
 
 import pytest
 from pydantic import BaseModel, ValidationError
+from pypdf import PdfWriter
 
 from roi_h.harness import loader
 from roi_h.harness.loader import default_skills_root, load_skills
@@ -31,33 +33,60 @@ def run(args: Input) -> Output:
 """
 
 
-def test_load_skills_discovers_browser_stub_tools() -> None:
+def test_load_skills_exposes_only_named_workflow_tools() -> None:
     catalog = load_skills(default_skills_root())
     names = {tool.name for tool in catalog.list_tools()}
-    # browser core + expanded tools + global skills
-    for required in (
-        "browser.navigate",
-        "browser.snapshot",
+
+    assert names == {
         "browser.click",
-        "browser.fill",
         "browser.download",
-        "browser.screenshot",
-        "files.read",
+        "browser.fill",
+        "browser.navigate",
+        "browser.session_stop",
+        "browser.snapshot",
         "excel.read_rows",
-        "http.get",
-        "feedback.record",
-        "shell.run",
-    ):
-        assert required in names, required
+        "excel.write_rows",
+        "files.hash",
+        "pdf.extract_text",
+    }
     navigate = catalog.resolve("browser", "navigate")
     assert navigate.deterministic is False
     assert str(navigate.script_path).endswith("skills/browser/scripts/navigate.py")
-    shell = catalog.resolve("shell", "run")
-    assert shell.requires_approval is True
-    assert catalog.resolve("files", "glob").effect == "read"
-    assert catalog.resolve("browser", "session_status").effect == "read"
-    assert catalog.resolve("browser", "navigate").network_hosts == ("*",)
-    assert catalog.resolve("http", "get").network_hosts == ("*",)
+    assert navigate.network_hosts == ("*",)
+    assert catalog.resolve("browser", "snapshot").allow_in_prod is False
+    assert catalog.resolve("files", "hash").effect == "read"
+    write_rows = catalog.resolve("excel", "write_rows")
+    assert "sheet" in write_rows.input_schema["properties"]
+
+
+def test_excel_skill_round_trips_the_named_summary_sheet(tmp_path: Path) -> None:
+    scripts = default_skills_root() / "excel" / "scripts"
+    writer = runpy.run_path(str(scripts / "write_rows.py"))
+    reader = runpy.run_path(str(scripts / "read_rows.py"))
+    path = tmp_path / "approved-invoice-summary.xlsx"
+    rows = [{"report_id": "A", "approved_count": 2, "approved_total_usd": "200.00"}]
+    headers = ["report_id", "approved_count", "approved_total_usd"]
+
+    writer["run"](writer["Input"](path=str(path), sheet="summary", rows=rows, headers=headers))
+    result = reader["run"](reader["Input"](path=str(path), sheet="summary"))
+
+    assert result.headers == headers
+    assert result.rows == [
+        {"report_id": "A", "approved_count": "2", "approved_total_usd": "200.00"}
+    ]
+
+
+def test_pdf_skill_uses_the_packaged_extractor(tmp_path: Path) -> None:
+    path = tmp_path / "report.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    writer.write(path)
+    extractor = runpy.run_path(str(default_skills_root() / "pdf" / "scripts" / "extract_text.py"))
+
+    result = extractor["run"](extractor["Input"](path=str(path)))
+
+    assert result.pages == 1
+    assert result.text == ""
 
 
 def test_strict_skill_models_reject_nested_coercion_and_extra_fields() -> None:
