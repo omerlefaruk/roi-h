@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
 import socket
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -85,15 +87,46 @@ def _read_state() -> dict[str, Any]:
     if not path.is_file():
         return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _write_state(data: dict[str, Any]) -> None:
     path = state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    descriptor, temporary_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(data, stream, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _session_details(state: dict[str, Any]) -> tuple[str, int, bool] | None:
+    endpoint = state.get("endpoint")
+    pid = state.get("pid")
+    headed = state.get("headed")
+    if (
+        not isinstance(endpoint, str)
+        or not endpoint.strip()
+        or not isinstance(pid, int)
+        or isinstance(pid, bool)
+        or pid <= 0
+        or not isinstance(headed, bool)
+    ):
+        return None
+    return endpoint.strip(), pid, headed
+
+
+def _recorded_pid(state: dict[str, Any]) -> int:
+    pid = state.get("pid")
+    return pid if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0 else 0
 
 
 def _chromium_executable() -> str:
@@ -174,6 +207,42 @@ def _launch_chromium(port: int, *, headed: bool) -> int:
     raise TimeoutError(msg)
 
 
+def _stop_pid(pid: int) -> bool:
+    if not _pid_alive(pid):
+        return False
+    try:
+        os.kill(pid, 15)
+    except OSError:
+        return False
+    time.sleep(0.2)
+    if _pid_alive(pid):
+        with contextlib.suppress(OSError):
+            os.kill(pid, 9)
+    return True
+
+
+def _start_session(*, headed: bool) -> tuple[str, int]:
+    port = _free_port()
+    pid = _launch_chromium(port, headed=headed)
+    endpoint = f"http://127.0.0.1:{port}"
+    try:
+        _write_state(
+            {
+                "endpoint": endpoint,
+                "pid": pid,
+                "headed": headed,
+                "ref_map": {},
+                "last_url": "",
+                "last_title": "",
+            }
+        )
+    except Exception:
+        with contextlib.suppress(Exception):
+            _stop_pid(pid)
+        raise
+    return endpoint, pid
+
+
 class LiveBrowser:
     def __init__(self) -> None:
         self._pw: Any = None
@@ -191,75 +260,39 @@ class LiveBrowser:
         from playwright.sync_api import sync_playwright
 
         state = _read_state()
-        endpoint = str(state.get("endpoint") or "")
-        pid = int(state.get("pid") or 0)
+        details = _session_details(state)
         requested_headed = want_headed() if headed is None else headed
-        mode_changed = bool(
-            endpoint
-            and pid
-            and _pid_alive(pid)
-            and state.get("headed") is not None
-            and bool(state["headed"]) != requested_headed
-        )
-        if mode_changed:
-            # A shared browser cannot change headedness in place.  It owns a
-            # persistent profile, so restarting it preserves Opera's session
-            # cookie while honoring the caller's explicit mode.
+        connect_timeout = timeout_ms or connect_timeout_ms()
+        if details is not None:
+            endpoint, pid, recorded_headed = details
+            if not _pid_alive(pid) or recorded_headed != requested_headed:
+                session_stop()
+                endpoint = ""
+        else:
+            # Missing, malformed, and incomplete state are disposable. If the
+            # valid part names one process, session_stop limits cleanup to it.
             session_stop()
             endpoint = ""
-            pid = 0
-        need_launch = not (endpoint and pid and _pid_alive(pid))
-        connect_timeout = timeout_ms or connect_timeout_ms()
 
-        if need_launch:
-            port = _free_port()
-            use_headed = requested_headed
-            pid = _launch_chromium(port, headed=use_headed)
-            endpoint = f"http://127.0.0.1:{port}"
-            _write_state(
-                {
-                    "endpoint": endpoint,
-                    "pid": pid,
-                    "headed": use_headed,
-                    "ref_map": {},
-                    "last_url": "",
-                    "last_title": "",
-                }
-            )
-
-        self._pw = sync_playwright().start()
-        try:
-            self.browser = self._pw.chromium.connect_over_cdp(
-                endpoint,
-                timeout=connect_timeout,
-            )
-        except Exception:
-            # Chromium sometimes keeps its HTTP CDP endpoint responsive while
-            # its websocket session is wedged. Recreate only our recorded
-            # browser process and retry once with the same bounded timeout.
-            self.close_connection()
-            if need_launch:
-                raise
-            session_stop()
-            port = _free_port()
-            use_headed = requested_headed
-            pid = _launch_chromium(port, headed=use_headed)
-            endpoint = f"http://127.0.0.1:{port}"
-            _write_state(
-                {
-                    "endpoint": endpoint,
-                    "pid": pid,
-                    "headed": use_headed,
-                    "ref_map": {},
-                    "last_url": "",
-                    "last_title": "",
-                }
-            )
-            self._pw = sync_playwright().start()
-            self.browser = self._pw.chromium.connect_over_cdp(
-                endpoint,
-                timeout=connect_timeout,
-            )
+        for attempt in range(2):
+            try:
+                if not endpoint:
+                    endpoint, _ = _start_session(headed=requested_headed)
+                self._pw = sync_playwright().start()
+                self.browser = self._pw.chromium.connect_over_cdp(
+                    endpoint,
+                    timeout=connect_timeout,
+                )
+                break
+            except Exception as exc:
+                # Recreate only the process in ROI-H's current state file. This
+                # also retries a first CDP failure after a fresh launch.
+                self.close_connection()
+                session_stop()
+                endpoint = ""
+                if attempt == 1:
+                    msg = f"browser.session_unavailable: {type(exc).__name__}: {exc}"
+                    raise RuntimeError(msg) from exc
         self.endpoint = endpoint
         if self.browser.contexts:
             self.context = self.browser.contexts[0]
@@ -312,7 +345,7 @@ def require_page(
 
 def session_status() -> dict[str, Any]:
     state = _read_state()
-    pid = int(state.get("pid") or 0)
+    pid = _recorded_pid(state)
     alive = bool(pid and _pid_alive(pid))
     return {
         "ok": True,
@@ -328,17 +361,8 @@ def session_status() -> dict[str, Any]:
 
 def session_stop() -> dict[str, Any]:
     state = _read_state()
-    pid = int(state.get("pid") or 0)
-    killed = False
-    if pid and _pid_alive(pid):
-        try:
-            os.kill(pid, 15)
-            killed = True
-            time.sleep(0.2)
-            if _pid_alive(pid):
-                os.kill(pid, 9)
-        except OSError:
-            pass
+    pid = _recorded_pid(state)
+    killed = bool(pid and _stop_pid(pid))
     path = state_path()
     if path.is_file():
         path.unlink()
