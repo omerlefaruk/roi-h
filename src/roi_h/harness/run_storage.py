@@ -16,10 +16,9 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 from roi_h.harness.atomicfs import atomic_write_json, hash_file
-from roi_h.harness.logical_paths import LogicalPath, PathResolver, PathScope
+from roi_h.harness.logical_paths import LogicalPath, PathResolver, PathScope, validate_run_id
 from roi_h.harness.workspace import Workspace
 
-_RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _ARTIFACT_ID = re.compile(r"^art_[A-Za-z0-9_-]{8,128}$")
 _ARTIFACT_FILE = re.compile(r"^(art_[A-Za-z0-9_-]{8,128})--(.+)$")
 _STAGING_PREFIX = ".attach-"
@@ -84,7 +83,7 @@ class RunStorage:
         self.resolver = PathResolver()
 
     def paths(self, run_id: str) -> RunPaths:
-        _validate_run_id(run_id)
+        validate_run_id(run_id)
         root = self.workspace.runs / run_id
         workspace = root / "workspace"
         return RunPaths(
@@ -378,12 +377,6 @@ class RunStorage:
         if missing:
             msg = f"run storage is incomplete: {missing}"
             raise RuntimeError(msg)
-
-
-def _validate_run_id(run_id: str) -> None:
-    if not _RUN_ID.fullmatch(run_id):
-        msg = f"invalid run id: {run_id!r}"
-        raise ValueError(msg)
 
 
 def _validate_artifact_name(name: str) -> None:

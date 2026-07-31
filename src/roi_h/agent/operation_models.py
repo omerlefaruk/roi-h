@@ -212,12 +212,46 @@ class _RunInputAddInput(CommonArguments):
     model_config = ConfigDict(
         json_schema_extra={
             "$schema": JSON_SCHEMA_DIALECT,
-            "required": ["source", "name"],
+            "required": ["name"],
+            "oneOf": [
+                {
+                    "required": ["source"],
+                    "properties": {"source": {"type": "string", "minLength": 1}},
+                    "not": {
+                        "anyOf": [
+                            {"required": ["from_run"]},
+                            {"required": ["source_path"]},
+                        ]
+                    },
+                },
+                {
+                    "required": ["from_run", "source_path"],
+                    "properties": {
+                        "from_run": {"type": "string", "minLength": 1},
+                        "source_path": {"type": "string", "minLength": 1},
+                    },
+                    "not": {"required": ["source"]},
+                },
+            ],
         }
     )
 
-    source: str | None
+    source: str | None = None
+    from_run: str | None = None
+    source_path: str | None = None
     name: str | None
+
+    @model_validator(mode="after")
+    def _require_one_source(self) -> _RunInputAddInput:
+        supplied = self.model_fields_set & {"source", "from_run", "source_path"}
+        external = supplied == {"source"} and bool(self.source)
+        prior_run = supplied == {"from_run", "source_path"} and bool(
+            self.from_run and self.source_path
+        )
+        if not external and not prior_run:
+            msg = "provide source or both from_run and source_path"
+            raise ValueError(msg)
+        return self
 
 
 class _SkillDefineInput(CommonArguments):
@@ -256,6 +290,17 @@ class _TaskListInput(CommonArguments):
 
 class _ToolInvokeInput(_NameWithDisplayInput):
     approval_mode: Literal["required", "full"] = "required"
+    filesystem_grants: list[
+        Literal[
+            "project:reference:read",
+            "run:input:read",
+            "run:work:read-write",
+            "run:output:read-write",
+            "run:tmp:read-write",
+            "artifact:read",
+            "automation:read",
+        ]
+    ] = Field(default_factory=list)
 
 
 class _OkOutput(OperationResult):
@@ -352,6 +397,8 @@ class _RunInputAddOutput(OperationResult):
     run_id: str
     path: str
     bytes: int
+    source_run_id: str | None = None
+    source_path: str | None = None
 
 
 class _RunFilesOutput(OperationResult):

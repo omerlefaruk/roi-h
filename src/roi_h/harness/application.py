@@ -193,6 +193,7 @@ class RunSession:
         actor: str = "ai",
         force: bool = False,
         identity: InvocationIdentity | None = None,
+        filesystem_grants: Sequence[str] | None = None,
     ) -> StepResult:
         """Run ``skill.tool`` (or queue approval) and record an ``rpa.step``."""
         return invoke_ops.invoke(
@@ -206,6 +207,7 @@ class RunSession:
             actor=actor,
             force=force,
             identity=identity,
+            filesystem_grants=filesystem_grants,
         )
 
     def approve(

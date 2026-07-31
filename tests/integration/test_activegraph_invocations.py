@@ -7,6 +7,7 @@ from pathlib import Path
 from roi_h import RunSession
 from roi_h.harness.custom import define_project_tool
 from roi_h.harness.loader import default_skills_root
+from roi_h.harness.run_storage import RunStorage
 from roi_h.harness.workspace import Workspace, create_project
 
 
@@ -57,6 +58,68 @@ def test_built_in_skill_rejects_unknown_input_fields(tmp_path: Path) -> None:
     assert result.status == "error"
     assert result.failure is not None
     assert result.failure.kind == "validation"
+
+
+def test_ai_can_grant_a_tool_filesystem_access_for_one_invocation(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    define_project_tool(
+        skill="diagnostic",
+        tool="read_log",
+        description="read one granted log",
+        project_root=workspace.project_skills,
+        source=(
+            "from pathlib import Path\n"
+            "from pydantic import BaseModel\n"
+            "TOOL_ID='read_log'\nDESCRIPTION='read one granted log'\n"
+            "TOOL_EFFECT='write'\nIDEMPOTENCY='reconcile'\nREQUIRES_APPROVAL=True\n"
+            "ALLOW_IN_PROD=False\nTIMEOUT_SECONDS=120.0\nSECRET_NAMES=()\nNETWORK_HOSTS=()\n"
+            "FILESYSTEM_ROOTS=()\n"
+            "class Input(BaseModel):\n    path: str\n"
+            "class Output(BaseModel):\n    text: str\n"
+            "def run(args: Input) -> Output:\n"
+            "    return Output(text=Path(args.path).read_text(encoding='utf-8'))\n"
+        ),
+    )
+    harness = RunSession.create(
+        workspace,
+        run_id="granted-filesystem",
+        skills_root=default_skills_root(),
+        auto_approve=False,
+    )
+    harness.start_run("grant one input")
+    (RunStorage(workspace).paths(harness.runtime.run_id).input / "source.log").write_text(
+        "diagnostic evidence",
+        encoding="utf-8",
+    )
+
+    denied = harness.invoke(
+        "diagnostic",
+        "read_log",
+        {"path": "run://input/source.log"},
+        force=True,
+    )
+    granted = harness.invoke(
+        "diagnostic",
+        "read_log",
+        {"path": "run://input/source.log"},
+        force=True,
+        filesystem_grants=("run:input:read",),
+    )
+    pending = harness.invoke(
+        "diagnostic",
+        "read_log",
+        {"path": "run://input/source.log"},
+        filesystem_grants=("run:input:read",),
+    )
+    approved = harness.approve(pending.approval_id or "")
+
+    assert denied.status == "error"
+    assert granted.status == "ok"
+    assert granted.output["text"] == "diagnostic evidence"
+    assert pending.status == "pending_approval"
+    assert approved.output["text"] == "diagnostic evidence"
+    invocation = harness.runtime.graph.objects(type="rpa.invocation")[-1]
+    assert invocation.data["filesystem_grants"] == ["run:input:read"]
 
 
 def test_write_tools_cannot_be_reinvoked_as_deterministic_replay(

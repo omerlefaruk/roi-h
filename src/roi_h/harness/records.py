@@ -124,6 +124,7 @@ class InvocationRecord(BaseModel):
     status: InvocationStatus = "scheduled"
     effect: ToolEffect = "read"
     idempotency: IdempotencyMode = "none"
+    filesystem_grants: list[str] = Field(default_factory=list)
     approval_id: str | None = None
     phase: str | None = None
     phase_id: str | None = None

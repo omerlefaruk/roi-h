@@ -210,6 +210,7 @@ def tool_invoke(request: CommandRequest) -> dict[str, Any]:
         actor=str(request.arguments.get("actor") or "ai"),
         force=approval_mode is None and request.arguments.get("force") is True,
         identity=identity,
+        filesystem_grants=tuple(request.arguments.get("filesystem_grants") or ()),
     )
     return result.model_dump(mode="json")
 

@@ -302,7 +302,20 @@ def run_input_add(request: CommandRequest) -> dict[str, Any]:
     workspace = _workspace(request)
     run_id = _run_id(request)
     paths = RunStorage(workspace).prepare(run_id)
-    source = Path(_required_string(request, "source")).expanduser().resolve()
+    source_run_id = _optional_string(request, "from_run")
+    source_path = _optional_string(request, "source_path")
+    if source_run_id is not None and source_path is not None:
+        source_logical = LogicalPath.parse(source_path)
+        if source_logical.scheme not in {"run", "artifact"}:
+            msg = "source_path must be a run or artifact logical path"
+            raise ValueError(msg)
+        source = PathResolver().resolve(
+            source_logical,
+            PathScope(workspace, run_id=source_run_id),
+            "read",
+        ).physical
+    else:
+        source = Path(_required_string(request, "source")).expanduser().resolve()
     if source.is_symlink() or not source.is_file():
         msg = "run input source is not a regular file"
         raise FileNotFoundError(msg)
@@ -326,7 +339,10 @@ def run_input_add(request: CommandRequest) -> dict[str, Any]:
         staging.replace(destination)
     finally:
         staging.unlink(missing_ok=True)
-    return {"run_id": run_id, "path": str(logical), "bytes": destination.stat().st_size}
+    result = {"run_id": run_id, "path": str(logical), "bytes": destination.stat().st_size}
+    if source_run_id is not None:
+        result.update(source_run_id=source_run_id, source_path=source_path)
+    return result
 
 
 def run_files(request: CommandRequest) -> dict[str, Any]:

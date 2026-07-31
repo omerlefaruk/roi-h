@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from activegraph import Runtime
@@ -34,6 +35,7 @@ def invoke(
     actor: str = "ai",
     force: bool = False,
     identity: InvocationIdentity | None = None,
+    filesystem_grants: Sequence[str] | None = None,
 ) -> StepResult:
     """Evaluate authority, then dispatch or propose through ActiveGraph."""
     if not runtime.budget.remaining():
@@ -42,6 +44,7 @@ def invoke(
         raise RuntimeError(msg)
 
     invocation = identity or InvocationIdentity.fresh(runtime.run_id)
+    grants = tuple(filesystem_grants or ())
     skill_tool = catalog.resolve(skill, tool)
     payload = dict(args or {})
     action_class = _ACTION_CLASS[skill_tool.effect]
@@ -64,6 +67,7 @@ def invoke(
                 actor=actor,
                 identity=invocation,
                 reason=decision.reason,
+                filesystem_grants=grants,
             )
         return submit_invocation(
             runtime,
@@ -72,6 +76,7 @@ def invoke(
             workspace=workspace,
             actor=actor,
             identity=invocation,
+            filesystem_grants=grants,
         )
     except Exception as exc:  # noqa: BLE001 — persist canonical rejection.
         return rejected_step(

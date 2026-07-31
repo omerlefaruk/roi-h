@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
+
 from roi_h.agent.cli import _emit
-from roi_h.agent.contract import CommandResult
+from roi_h.agent.contract import CommandContext, CommandRequest, CommandResult
+from roi_h.agent.dispatcher import Dispatcher
+from roi_h.harness.run_storage import RunStorage
+from roi_h.harness.workspace import Workspace, create_project
 
 
 def _agent(
@@ -254,6 +260,107 @@ def test_agent_can_find_and_explain_a_run_without_sql(tmp_path: Path) -> None:
         result = json.loads(called.stdout)["result"]
         assert result["run_id"] == "agent-read-run"
         assert str(tmp_path) not in called.stdout
+
+
+def test_agent_can_copy_a_source_run_file_into_the_current_run(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    create_project(home, "demo")
+    workspace = Workspace.open(home, project="demo", env="dev")
+    storage = RunStorage(workspace)
+    source = storage.prepare("source-run").input / "source.log"
+    source.write_text("diagnostic evidence", encoding="utf-8")
+    target = storage.prepare("target-run").input / "diagnostic.log"
+
+    copied = Dispatcher().execute(
+        "run.input.add",
+        CommandRequest(
+            idempotency_key="copy-source-log",
+            context=CommandContext(project="demo", environment="dev", run_id="target-run"),
+            arguments={
+                "home": str(home),
+                "from_run": "source-run",
+                "source_path": "run://input/source.log",
+                "name": "diagnostic.log",
+            },
+        ),
+    )
+
+    assert copied.ok is True
+    assert copied.result is not None
+    assert copied.result["path"] == "run://input/diagnostic.log"
+    assert copied.result["source_run_id"] == "source-run"
+    assert copied.result["source_path"] == "run://input/source.log"
+    assert target.read_text(encoding="utf-8") == "diagnostic evidence"
+
+    production = Workspace.open(home, project="demo", env="prod")
+    prod_log = RunStorage(production).prepare("prod-run").input / "secret.log"
+    prod_log.write_text("production secret", encoding="utf-8")
+    escaped = Dispatcher().execute(
+        "run.input.add",
+        CommandRequest(
+            idempotency_key="reject-cross-environment-copy",
+            context=CommandContext(project="demo", environment="dev", run_id="target-run"),
+            arguments={
+                "home": str(home),
+                "from_run": "../../prod/runs/prod-run",
+                "source_path": "run://input/secret.log",
+                "name": "escaped.log",
+            },
+        ),
+    )
+    assert escaped.ok is False
+    assert escaped.error is not None
+    assert escaped.error.code == "path.invalid_logical_path"
+    assert not target.with_name("escaped.log").exists()
+
+    linked_root = storage.prepare("linked-root-run")
+    (linked_root.output / "secret.log").write_text("wrong capability root", encoding="utf-8")
+    linked_root.input.rmdir()
+    try:
+        linked_root.input.symlink_to(linked_root.output, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlinks are unavailable: {exc}")
+    wrong_root = Dispatcher().execute(
+        "run.input.add",
+        CommandRequest(
+            idempotency_key="reject-cross-root-copy",
+            context=CommandContext(project="demo", environment="dev", run_id="target-run"),
+            arguments={
+                "home": str(home),
+                "from_run": "linked-root-run",
+                "source_path": "run://input/secret.log",
+                "name": "wrong-root.log",
+            },
+        ),
+    )
+    assert wrong_root.ok is False
+    assert wrong_root.error is not None
+    assert wrong_root.error.code == "path.escape_denied"
+
+    linked_run = workspace.runs / "linked-prod-run"
+    linked_run.symlink_to(prod_log.parents[2], target_is_directory=True)
+    linked = Dispatcher().execute(
+        "run.input.add",
+        CommandRequest(
+            idempotency_key="reject-symlinked-run-copy",
+            context=CommandContext(project="demo", environment="dev", run_id="target-run"),
+            arguments={
+                "home": str(home),
+                "from_run": "linked-prod-run",
+                "source_path": "run://input/secret.log",
+                "name": "linked.log",
+            },
+        ),
+    )
+    assert linked.ok is False
+    assert linked.error is not None
+    assert linked.error.code == "path.escape_denied"
+    assert not target.with_name("linked.log").exists()
+
+    shutil.rmtree(workspace.environment_root)
+    workspace.environment_root.symlink_to(production.environment_root, target_is_directory=True)
+    with pytest.raises(RuntimeError, match=r"path\.escape_denied"):
+        Workspace.open(home, project="demo", env="dev")
 
 
 def test_agent_secret_set_uses_a_separate_standard_input_channel(tmp_path: Path) -> None:

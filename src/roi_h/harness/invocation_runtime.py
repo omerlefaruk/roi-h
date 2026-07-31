@@ -81,6 +81,8 @@ class IsolatedSkillInvoker:
         tool: Tool,
         args: Any,
         ctx: ToolContext,
+        *,
+        filesystem_grants: tuple[str, ...] = (),
     ) -> CachedToolResponse:
         skill, separator, tool_id = tool.name.partition(".")
         if not separator:
@@ -99,7 +101,7 @@ class IsolatedSkillInvoker:
         worker_payload = materialize_tool_payload(
             worker_payload,
             scope=path_scope,
-            capabilities=skill_tool.filesystem_roots,
+            capabilities=(*skill_tool.filesystem_roots, *filesystem_grants),
             effect=skill_tool.effect,
         )
         started = time.monotonic()
@@ -217,7 +219,12 @@ def build_invocation_behaviors(
                 timeout_seconds=tool.timeout_seconds,
                 external_io_mode="runtime_recorded",
             )
-            response = invoker.invoke(tool, validated_args, tool_context)
+            response = invoker.invoke(
+                tool,
+                validated_args,
+                tool_context,
+                filesystem_grants=tuple(data.get("filesystem_grants") or ()),
+            )
             latency = response.latency_seconds
             validated_output: Any = response.output
             if tool.output_schema is not None:
@@ -323,6 +330,7 @@ def submit_invocation(
     actor: str,
     identity: InvocationIdentity,
     approval_id: str | None = None,
+    filesystem_grants: tuple[str, ...] = (),
 ) -> StepResult:
     """Persist one invocation; ActiveGraph schedules its execution behavior."""
     _enforce_policy(skill_tool, workspace)
@@ -345,6 +353,7 @@ def submit_invocation(
         actor=actor,
         effect=skill_tool.effect,
         idempotency=skill_tool.idempotency,
+        filesystem_grants=list(filesystem_grants),
         approval_id=approval_id,
         phase=phase_name,
         phase_id=phase_id,
@@ -372,6 +381,7 @@ def request_invocation_approval(
     actor: str,
     identity: InvocationIdentity,
     reason: str,
+    filesystem_grants: tuple[str, ...] = (),
 ) -> StepResult:
     """Route an invocation through ActiveGraph's durable approval queue."""
     _enforce_policy(skill_tool, workspace)
@@ -390,6 +400,7 @@ def request_invocation_approval(
         actor=actor,
         effect=skill_tool.effect,
         idempotency=skill_tool.idempotency,
+        filesystem_grants=list(filesystem_grants),
         phase=phase_name,
         phase_id=phase_id,
     )
