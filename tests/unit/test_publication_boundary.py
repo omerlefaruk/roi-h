@@ -38,6 +38,7 @@ def test_accepts_generic_core_files_and_public_skills() -> None:
         "README.md",
         "docs/distribution-and-updates.md",
         "skills/browser/SKILL.md",
+        "skills/codex_chrome/SKILL.md",
         "skills/excel/scripts/read_rows.py",
         "src/roi_h/harness/automation.py",
         "tests/unit/test_workspace_projects.py",

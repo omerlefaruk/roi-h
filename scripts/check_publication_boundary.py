@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-PUBLIC_SKILLS = frozenset({"browser", "excel", "files", "pdf"})
+PUBLIC_SKILLS = frozenset({"browser", "codex_chrome", "excel", "files", "pdf"})
 _HISTORICAL_PUBLIC_SKILL_FILES = frozenset(
     {
         "skills/feedback/SKILL.md",
