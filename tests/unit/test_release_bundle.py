@@ -89,8 +89,8 @@ def test_builder_creates_hashed_self_contained_release_bundle(tmp_path: Path) ->
         assert release["browser_revision"] == "chromium-1234"
         assert release["data_compatibility"] == {
             "activegraph_version": "1.10.0",
-            "readable_home_layouts": [1],
-            "writable_home_layout": 1,
+            "readable_home_layouts": [1, 2, 3, 4],
+            "writable_home_layout": 4,
         }
         assert release["targets"] == [
             {

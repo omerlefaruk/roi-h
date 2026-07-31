@@ -34,9 +34,10 @@ def test_public_operation_schemas_describe_required_arguments_and_results() -> N
         "enum": ["required", "full"],
         "type": "string",
     }
-    assert "run:input:read" in tool_invoke.input_schema["properties"][
-        "filesystem_grants"
-    ]["items"]["enum"]
+    assert (
+        "run:input:read"
+        in tool_invoke.input_schema["properties"]["filesystem_grants"]["items"]["enum"]
+    )
 
     run_input = catalog.describe("run.input.add")[0]
     assert any(

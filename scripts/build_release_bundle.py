@@ -125,8 +125,8 @@ def build_release_bundle(request: ReleaseBundleRequest) -> dict[str, object]:
         "python_version": request.python_version,
         "browser_revision": request.browser_revision,
         "data_compatibility": {
-            "readable_home_layouts": [1],
-            "writable_home_layout": 1,
+            "readable_home_layouts": [1, 2, 3, 4],
+            "writable_home_layout": 4,
             "activegraph_version": request.activegraph_version,
         },
         "targets": targets,

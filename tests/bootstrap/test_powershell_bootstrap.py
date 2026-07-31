@@ -14,11 +14,11 @@ def test_powershell_bootstrap_matches_the_pinned_install_contract() -> None:
         in script
     )
     assert '$pythonVersion = "3.12.13"' in script
-    assert '$defaultInstallerVersion = "0.1.3"' in script
-    assert "roi-h-release-windows-x86_64-0.1.5.tar.gz" in script
+    assert '$defaultInstallerVersion = "0.1.4"' in script
+    assert "roi-h-release-windows-x86_64-0.1.7.tar.gz" in script
     assert (
         "$defaultReleaseBundleSha256 = "
-        '"55b9f2e147dafac9b3126e195ed42733a8a62fe4d21d232c78e384537a68d267"' in script
+        '"11a6117fda7910174f7d6928c90472fb6a47dc4d4fa7bfb4b2d98d4afb53426b"' in script
     )
     assert "$env:ROI_H_INSTALLER_VERSION" in script
     assert "$env:ROI_H_RELEASE_BUNDLE_URL" in script

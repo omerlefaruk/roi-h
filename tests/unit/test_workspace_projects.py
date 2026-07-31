@@ -35,9 +35,7 @@ def test_create_list_use_project(tmp_path: Path) -> None:
     assert (project / "packages" / "automations").is_dir()
     assert (project / "environments" / "prod" / "store").is_dir()
     assert (project / "reference").is_dir()
-    assert json.loads((project / "project.json").read_text())["retention"][
-        "log_retention"
-    ] == "7d"
+    assert json.loads((project / "project.json").read_text())["retention"]["log_retention"] == "7d"
     assert (home / "skills").is_dir()
     assert get_active_project(home) == "acme-orders"
 
@@ -141,9 +139,7 @@ def test_project_open_uses_the_managed_project_root(
     opened: list[Path] = []
     monkeypatch.setattr(cli_module, "_open_directory", opened.append)
 
-    result = cli_module._cmd_project_open(
-        Namespace(home=str(home), name="demo", env="dev")
-    )
+    result = cli_module._cmd_project_open(Namespace(home=str(home), name="demo", env="dev"))
 
     assert result["opened"] == "project://"
     assert opened == [(home / "projects" / "demo").resolve()]

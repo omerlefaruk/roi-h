@@ -114,9 +114,7 @@ class RetentionPlanner:
             current_retention = _log_retention(workspace, None)
             for run_id in sorted({str(item.get("run_id") or "") for item in planned}):
                 leases.enter_context(run_lease(workspace, run_id))
-            refreshed = [
-                _refresh_target(workspace, item, current_retention) for item in planned
-            ]
+            refreshed = [_refresh_target(workspace, item, current_retention) for item in planned]
             refreshed_bytes = sum(int(item["bytes"]) for item in refreshed)
             if _plan_fingerprint_from_plan(plan, refreshed, refreshed_bytes) != plan.fingerprint:
                 msg = "retention.plan_stale: storage or policy changed after plan creation"
@@ -218,11 +216,7 @@ def _target(
         "relative_path": path.relative_to(workspace.project_root).as_posix(),
         "classification": classification,
         **metadata,
-        "bytes": sum(
-            int(str(item["bytes"]))
-            for item in file_state
-            if item.get("kind") == "file"
-        ),
+        "bytes": sum(int(str(item["bytes"])) for item in file_state if item.get("kind") == "file"),
         "files": file_state,
     }
 

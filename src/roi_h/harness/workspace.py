@@ -282,10 +282,7 @@ def init_project(
     project_root = _project_dir(base, selected)
     _assert_managed_project_root(base, project_root)
     if not project_root.is_dir():
-        msg = (
-            f"project not found: {selected!r}. "
-            f"Create it with: roi-h project create {selected}"
-        )
+        msg = f"project not found: {selected!r}. Create it with: roi-h project create {selected}"
         raise FileNotFoundError(msg)
     _validate_project_manifest(project_root)
     _ensure_project_roots(project_root)

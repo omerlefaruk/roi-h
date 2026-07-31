@@ -309,11 +309,15 @@ def run_input_add(request: CommandRequest) -> dict[str, Any]:
         if source_logical.scheme not in {"run", "artifact"}:
             msg = "source_path must be a run or artifact logical path"
             raise ValueError(msg)
-        source = PathResolver().resolve(
-            source_logical,
-            PathScope(workspace, run_id=source_run_id),
-            "read",
-        ).physical
+        source = (
+            PathResolver()
+            .resolve(
+                source_logical,
+                PathScope(workspace, run_id=source_run_id),
+                "read",
+            )
+            .physical
+        )
     else:
         source = Path(_required_string(request, "source")).expanduser().resolve()
     if source.is_symlink() or not source.is_file():

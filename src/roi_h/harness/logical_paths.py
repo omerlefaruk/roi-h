@@ -202,11 +202,7 @@ class PathResolver:
                 msg = "path.invalid_logical_path: relative path needs run scope"
                 raise LogicalPathError(msg)
             path = (
-                scope.workspace.runs
-                / validate_run_id(scope.run_id)
-                / "workspace"
-                / "work"
-                / path
+                scope.workspace.runs / validate_run_id(scope.run_id) / "workspace" / "work" / path
             )
         path = path.resolve()
         workspace = scope.workspace
@@ -285,9 +281,7 @@ def materialize_tool_payload(
             value = f"run://work/{PurePosixPath(value).as_posix()}"
         logical = LogicalPath.parse(value)
         required = _capability_for(logical)
-        intent: PathIntent = (
-            "read" if effect == "read" or required.endswith(":read") else "create"
-        )
+        intent: PathIntent = "read" if effect == "read" or required.endswith(":read") else "create"
         if required not in allowed:
             msg = f"path.capability_denied: {required} is not declared; declared={sorted(allowed)}"
             raise PathCapabilityError(msg)
