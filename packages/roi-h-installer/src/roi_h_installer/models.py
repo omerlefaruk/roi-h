@@ -62,6 +62,7 @@ class EffectKind(StrEnum):
     CREATE_VERSION = "create_version"
     INSTALL_BROWSER = "install_browser"
     INSTALL_AGENT_INSTRUCTIONS = "install_agent_instructions"
+    INSTALL_AGENT_SKILL = "install_agent_skill"
     INSTALL_LAUNCHER = "install_launcher"
     ACTIVATE_VERSION = "activate_version"
 

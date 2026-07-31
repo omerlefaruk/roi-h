@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _PUBLIC_SKILLS = {"browser", "codex_chrome", "excel", "files", "pdf"}
+_PUBLIC_AGENT_SKILLS = {"migrate-code-automation"}
 
 
 def test_wheel_contains_only_roi_h_and_distribution_metadata(tmp_path: Path) -> None:
@@ -28,6 +29,8 @@ def test_wheel_contains_only_roi_h_and_distribution_metadata(tmp_path: Path) -> 
 
     assert "roi_h/py.typed" in names
     assert "roi_h/harness/application.py" in names
+    assert "roi_h/_agent_skills/migrate-code-automation/SKILL.md" in names
+    assert "roi_h/_agent_skills/migrate-code-automation/agents/openai.yaml" in names
     assert "roi_h/application.py" not in names
     assert "roi_h/domain.py" not in names
     assert not any(name.startswith("roi_h/packs/") for name in names)
@@ -54,7 +57,13 @@ def test_wheel_contains_only_roi_h_and_distribution_metadata(tmp_path: Path) -> 
         for name in names
         if name.startswith("roi_h/_skills/") and len(name.split("/")) > 3
     }
+    packaged_agent_skills = {
+        name.split("/")[2]
+        for name in names
+        if name.startswith("roi_h/_agent_skills/") and len(name.split("/")) > 3
+    }
     assert packaged_skills == _PUBLIC_SKILLS
+    assert packaged_agent_skills == _PUBLIC_AGENT_SKILLS
     assert any(".dist-info/licenses/LICENSE" in name for name in names)
 
     installed = tmp_path / "installed"
@@ -68,11 +77,17 @@ def test_wheel_contains_only_roi_h_and_distribution_metadata(tmp_path: Path) -> 
             sys.executable,
             "-c",
             (
+                "from pathlib import Path; "
+                "from roi_h.agent_instructions import install_agent_instructions; "
                 "from roi_h.harness.loader import default_skills_root, load_skills; "
                 "root=default_skills_root(); "
                 "catalog=load_skills(); "
                 "assert root.name == '_skills'; "
-                "assert catalog.resolve('browser', 'navigate')"
+                "assert catalog.resolve('browser', 'navigate'); "
+                "home=Path.cwd() / 'agent-home'; "
+                "install_agent_instructions(home); "
+                "assert (home / '.codex/skills/migrate-code-automation/SKILL.md').is_file(); "
+                "assert (home / '.agents/skills/migrate-code-automation/SKILL.md').is_file()"
             ),
         ],
         cwd=tmp_path,

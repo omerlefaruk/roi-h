@@ -12,6 +12,7 @@ def test_rejects_private_runtime_and_customer_material() -> None:
         "skills/feedback/scripts/record.py",
         "skills/http/scripts/get.py",
         "skills/shell/scripts/run.py",
+        "src/roi_h/_agent_skills/customer-private/SKILL.md",
         "projects/acme/dev/automations/job/recipe.json",
         "customer/browser-profile/Default/Cookies",
     ]
@@ -40,6 +41,8 @@ def test_accepts_generic_core_files_and_public_skills() -> None:
         "skills/browser/SKILL.md",
         "skills/codex_chrome/SKILL.md",
         "skills/excel/scripts/read_rows.py",
+        "src/roi_h/_agent_skills/migrate-code-automation/SKILL.md",
+        "src/roi_h/_agent_skills/migrate-code-automation/agents/openai.yaml",
         "src/roi_h/harness/automation.py",
         "tests/unit/test_workspace_projects.py",
     ]

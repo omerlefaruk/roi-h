@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import os
+from importlib import resources
 from pathlib import Path
 
 from roi_h.harness.atomicfs import atomic_write_text
 
-INSTRUCTIONS_VERSION = 2
+INSTRUCTIONS_VERSION = 3
+AGENT_SKILLS = ("migrate-code-automation",)
+AGENT_SKILL_MARKER = "<!-- ROI-H managed agent skill -->"
+_AGENT_SKILL_FILES = ("SKILL.md", "agents/openai.yaml")
 BEGIN_MARKER = "<!-- ROI-H instructions: begin -->"
 END_MARKER = "<!-- ROI-H instructions: end -->"
 MANAGED_INSTRUCTIONS = f"""\
@@ -32,7 +36,8 @@ When a task uses ROI-H:
 - Never put secret values in prompts, JSON, arguments, logs, plans, or files. Use the
   secure standard-input channel.
 - For product tasks, do not bypass ROI-H with direct browser, shell, network, file, or
-  database operations.
+  database operations. For code migration only, you can inspect user-supplied source files
+  read-only. Do not execute or change the legacy automation.
 - Build repeatable work in `dev`, verify the run evidence, ship an immutable automation,
   dry-run it, and use `prod` only when the user requests a production run.
 - Report the project, environment, run or task ID, automation version, artifacts,
@@ -56,24 +61,37 @@ def instruction_paths(user_home: Path | None = None) -> tuple[Path, Path]:
     return codex_home / "AGENTS.md", resolved_home / ".agents" / "AGENTS.md"
 
 
+def agent_skill_paths(user_home: Path | None = None) -> tuple[Path, ...]:
+    """Return the managed agent skill directories."""
+    instruction_files = instruction_paths(user_home)
+    return tuple(
+        instruction_file.parent / "skills" / name
+        for instruction_file in instruction_files
+        for name in AGENT_SKILLS
+    )
+
+
 def install_agent_instructions(
     user_home: Path | None = None,
 ) -> tuple[tuple[Path, bool], ...]:
-    """Install or update the managed block without changing other instructions."""
-    paths = instruction_paths(user_home)
-    originals: dict[Path, str | None] = {}
+    """Install or update managed instructions and agent skills."""
+    instruction_files = instruction_paths(user_home)
     updates: dict[Path, str] = {}
-    for path in paths:
-        existing = path.read_text(encoding="utf-8") if path.exists() else None
-        originals[path] = existing
-        updates[path] = _merge_instructions(existing or "")
+    for path in instruction_files:
+        existing = path.read_text(encoding="utf-8") if path.exists() else ""
+        updates[path] = _merge_instructions(existing)
 
+    updates.update(_agent_skill_updates(user_home))
+
+    originals = {
+        path: path.read_text(encoding="utf-8") if path.exists() else None for path in updates
+    }
     written: list[Path] = []
     try:
-        for path in paths:
-            if updates[path] == originals[path]:
+        for path, text in updates.items():
+            if text == originals[path]:
                 continue
-            atomic_write_text(path, updates[path])
+            atomic_write_text(path, text)
             written.append(path)
     except OSError:
         for path in reversed(written):
@@ -83,7 +101,30 @@ def install_agent_instructions(
             else:
                 atomic_write_text(path, original)
         raise
-    return tuple((path, path in written) for path in paths)
+    return tuple((path, path in written) for path in updates)
+
+
+def _agent_skill_updates(user_home: Path | None) -> dict[Path, str]:
+    source_root = resources.files("roi_h").joinpath("_agent_skills")
+    updates: dict[Path, str] = {}
+    for skill_path in agent_skill_paths(user_home):
+        source_skill = source_root.joinpath(skill_path.name)
+        source_files = {
+            relative: source_skill.joinpath(*relative.split("/")).read_text(encoding="utf-8")
+            for relative in _AGENT_SKILL_FILES
+        }
+        existing_files = [skill_path / relative for relative in _AGENT_SKILL_FILES]
+        if any(path.exists() for path in existing_files):
+            manifest = skill_path / "SKILL.md"
+            existing_manifest = manifest.read_text(encoding="utf-8") if manifest.is_file() else ""
+            if (
+                existing_manifest != source_files["SKILL.md"]
+                and AGENT_SKILL_MARKER not in existing_manifest
+            ):
+                msg = f"An unmanaged agent skill already exists: {skill_path}"
+                raise FileExistsError(msg)
+        updates.update((skill_path / relative, text) for relative, text in source_files.items())
+    return updates
 
 
 def _merge_instructions(existing: str) -> str:
@@ -101,10 +142,13 @@ def _merge_instructions(existing: str) -> str:
 
 
 __all__ = [
+    "AGENT_SKILLS",
+    "AGENT_SKILL_MARKER",
     "BEGIN_MARKER",
     "END_MARKER",
     "INSTRUCTIONS_VERSION",
     "MANAGED_INSTRUCTIONS",
+    "agent_skill_paths",
     "install_agent_instructions",
     "instruction_paths",
 ]

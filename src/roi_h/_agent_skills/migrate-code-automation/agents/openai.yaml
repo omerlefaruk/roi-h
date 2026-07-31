@@ -1,0 +1,4 @@
+interface:
+  display_name: "Migrate Code Automation"
+  short_description: "Migrate code automations into ROI-H"
+  default_prompt: "Use $migrate-code-automation to migrate this automation codebase into a verified ROI-H automation."

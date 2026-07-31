@@ -155,10 +155,16 @@ The managed installer adds one marked ROI-H block to the user-level instruction 
   `<user-home>/.codex/AGENTS.md`; and
 - `<user-home>/.agents/AGENTS.md`.
 
-Existing text stays unchanged. Install and update replace only the marked ROI-H block, so
-repeated installation does not create duplicate instructions. The block tells agents to
-start with `roi-h agent context` and `roi-h agent describe`; it does not copy operation
-schemas or contain project names, paths, customer data, or secrets.
+It also installs the `migrate-code-automation` agent skill under both corresponding
+`skills` directories. That skill guides migration of Python and JavaScript automations
+through native ROI-H operations, verification, package publication, and dry-run. During
+migration, the agent can inspect user-supplied legacy source read-only, but must not execute
+or change it. Target project writes and effects still use ROI-H.
+
+Existing instruction text stays unchanged. Install and update replace only the marked
+ROI-H block and the managed skill, so repeated installation does not create duplicates.
+The block tells agents to start with `roi-h agent context` and `roi-h agent describe`; it
+does not copy operation schemas or contain project names, paths, customer data, or secrets.
 
 Show the managed block or repair both files with:
 
@@ -170,9 +176,9 @@ roi-h instructions --install
 An AI agent reads these files only when its host supports that instruction location.
 The live ROI-H manifest remains the authority after instruction discovery.
 
-## Skill contract
+## Runtime skill contract
 
-A `SKILL.md` file contains only guidance that the live manifest cannot express:
+A runtime skill `SKILL.md` file contains only guidance that the live manifest cannot express:
 
 ```markdown
 ---
@@ -184,7 +190,9 @@ One short domain procedure, when required.
 ```
 
 It must not copy operation schemas, command layouts, safety rules, model names, or
-orchestration. Each executable tool module defines strict Pydantic `Input` and `Output`
+orchestration. Installed agent skills can guide a cross-operation workflow, but must defer
+common operating rules and all schemas to the managed instructions and live manifest.
+Each executable tool module defines strict Pydantic `Input` and `Output`
 models, `run(args: Input) -> Output`, and its effect, idempotency, approval, production,
 timeout, secret, network, and filesystem metadata. Missing custom-tool security metadata
 fails closed. ROI-H inspects custom modules in a bounded worker and never imports them in
