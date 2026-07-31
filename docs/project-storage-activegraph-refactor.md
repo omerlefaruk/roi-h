@@ -508,7 +508,30 @@ Exports are written to an operator-selected destination. Backups should normally
 written outside the data home so a single disk failure does not destroy both live state
 and backups.
 
-### 8.2 Permissions
+### 8.2 Developer tree
+
+The physical layout above remains authoritative. Developer commands show this stable view
+for the selected environment without copying data or exposing absolute paths:
+
+```text
+project://
+├── config/project.json       -> project.json
+├── reference/                -> reference/
+├── skills/                   -> skills/
+├── automations/              -> packages/automations/
+└── runs/                     -> environments/<selected-env>/runs/
+    └── <run-id>/
+        ├── run.json          -> run-files.json
+        ├── input/            -> workspace/input/
+        ├── output/           -> workspace/output/
+        ├── screenshots/      -> image artifacts
+        └── logs/             -> diagnostics/
+```
+
+`logs` is developer language for run-scoped diagnostics. Home diagnostics keep their
+`diagnostics` name. The view does not create aliases, links, or duplicate files.
+
+### 8.3 Permissions
 
 On Unix-like systems:
 
@@ -574,6 +597,7 @@ a project.
     "workspace_days_after_failure": 30,
     "runtime_days": 7,
     "diagnostic_days": 14,
+    "log_retention": "7d",
     "artifact_policy": "keep",
     "event_policy": "keep"
   }
@@ -1242,7 +1266,8 @@ There is no permanent project-wide log history.
 
 ### 15.8 CLI naming
 
-Use `diagnostics`, not `logs`, for the fallback records:
+Use `diagnostics` for home fallback records. The developer project tree can use `logs`
+for run-scoped diagnostics:
 
 ```shell
 roi-h diagnostics show
@@ -1813,6 +1838,8 @@ rules, ActiveGraph horizons, and blockers.
 
 Conservative initial defaults:
 
+- keep closed-run logs for the project `log_retention` period, which defaults to 7 days;
+- `forever` disables run-log cleanup;
 - remove `tmp/` after terminal run cleanup;
 - keep successful workspaces for 7 days;
 - keep failed/outcome-unknown workspaces for 30 days;
@@ -2096,16 +2123,26 @@ operation catalog. New CLI work must follow both sources.
 
 ```shell
 roi-h rpa project list
-roi-h rpa project show
-roi-h rpa project create NAME --use
+roi-h project show
+roi-h project create NAME [--log-retention 7d]
+roi-h project init [NAME] [--env dev|prod] [--log-retention 7d]
+roi-h project config [NAME] --log-retention 30d
+roi-h project tree [NAME]
+roi-h project open [NAME]
 roi-h rpa project use NAME
 roi-h rpa project paths
+roi-h rpa project debug-paths
 roi-h rpa project doctor [--full]
 roi-h rpa project export NAME --output FILE [--mode definition|full]
 roi-h rpa project import FILE [--name NAME] [--verify-only]
 roi-h rpa project rename OLD NEW
 roi-h rpa project delete NAME
 ```
+
+`project create` is the only command in this group that creates a project. `project init`
+selects and verifies an existing project. Without `NAME`, init infers a project only when
+the current directory is exactly `<home>/projects/<name>`. Human init and machine
+`project.use` share the same selection implementation.
 
 ### Environment
 

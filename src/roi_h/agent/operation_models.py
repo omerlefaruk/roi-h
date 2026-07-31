@@ -274,6 +274,11 @@ class _NameWithDisplayInput(_NameInput):
     display_name: str | None = None
 
 
+class _ProjectCreateInput(_NameWithDisplayInput):
+    use: bool = True
+    log_retention: str = Field(default="7d", pattern=r"^(?:[1-9][0-9]{0,8}d|forever)$")
+
+
 class _OutputWithDisplayInput(_OutputInput):
     display_name: str | None = None
 
@@ -509,7 +514,7 @@ _INPUT_MODELS: dict[str, OperationModel] = {
     "phase.fail": _ErrorInput,
     "phase.retry": _NameInput,
     "phase.skip": _NameInput,
-    "project.create": _NameWithDisplayInput,
+    "project.create": _ProjectCreateInput,
     "project.delete.apply": _PlanIdWithDisplayInput,
     "project.delete.plan": _NameWithDisplayInput,
     "project.export": _OutputInput,

@@ -15,10 +15,12 @@ from pathlib import Path
 from typing import Any, Literal
 
 from roi_h.harness.atomicfs import atomic_write_json
+from roi_h.harness.lease import project_policy_lease
 
 EnvName = Literal["dev", "prod"]
 _VALID_ENVS = frozenset({"dev", "prod"})
 _PROJECT_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+_LOG_RETENTION_RE = re.compile(r"^[1-9][0-9]{0,8}d$")
 _RESERVED_PROJECT_NAMES = frozenset({"projects", "config", "diagnostics", "cache"})
 HOME_LAYOUT_VERSION = 4
 PROJECT_SCHEMA_VERSION = 1
@@ -30,6 +32,7 @@ _DEFAULT_RETENTION: dict[str, Any] = {
     "workspace_days_after_failure": 30,
     "runtime_days": 7,
     "diagnostic_days": 14,
+    "log_retention": "7d",
     "artifact_policy": "keep",
     "event_policy": "keep",
 }
@@ -76,6 +79,7 @@ class Workspace:
         _assert_supported_home(home_config_path)
         project_name = _resolve_project(project, home_config_path, base)
         project_root = _project_dir(base, project_name)
+        _assert_managed_project_root(base, project_root)
         if not project_root.is_dir():
             msg = (
                 f"project {project_name!r} not found under {base / 'projects'}. "
@@ -84,6 +88,7 @@ class Workspace:
             raise FileNotFoundError(msg)
 
         project_config_path = _project_manifest_path(project_root)
+        _assert_safe_child(project_config_path, project_root)
         project_cfg = _read_config(project_config_path)
         if not project_cfg:
             if (project_root / "config.json").is_file():
@@ -103,12 +108,7 @@ class Workspace:
             raise ValueError(msg)
 
         active_env = _resolve_env(env, home_config_path, project_name)
-        for env_name in sorted(_VALID_ENVS):
-            environment = project_root / "environments" / env_name
-            if environment.is_symlink():
-                msg = f"path.escape_denied: environment root is a symlink: {env_name}"
-                raise RuntimeError(msg)
-            _ensure_environment_roots(environment, env_name)
+        _ensure_project_roots(project_root)
         environment_root = project_root / "environments" / active_env
         environment_config_path = environment_root / "environment.json"
 
@@ -181,12 +181,14 @@ def create_project(
     display_name: str = "",
     set_active: bool = True,
     env: str = "dev",
+    log_retention: str = "7d",
 ) -> dict[str, Any]:
     """Atomically create a version-4 project definition and two environments."""
     validate_project_name(name)
     if env not in _VALID_ENVS:
         msg = f"env must be one of {sorted(_VALID_ENVS)}, got {env!r}"
         raise ValueError(msg)
+    log_retention = validate_log_retention(log_retention)
 
     base = _prepare_home(root)
     project_root = _project_dir(base, name)
@@ -200,6 +202,7 @@ def create_project(
     try:
         staging.mkdir(mode=0o700)
         for relative in (
+            ".locks",
             "reference",
             "skills",
             "packages/automations",
@@ -209,7 +212,7 @@ def create_project(
             (staging / relative).mkdir(parents=True, mode=0o700)
         for env_name in sorted(_VALID_ENVS):
             env_root = staging / "environments" / env_name
-            _ensure_environment_roots(env_root, env_name)
+            _ensure_environment_roots(env_root, env_name, containment_root=staging)
         atomic_write_json(
             staging / "project.json",
             {
@@ -219,7 +222,7 @@ def create_project(
                 "display_name": display_name or name,
                 "created_at": created_at,
                 "required_secrets": [],
-                "retention": dict(_DEFAULT_RETENTION),
+                "retention": {**_DEFAULT_RETENTION, "log_retention": log_retention},
             },
             mode=0o600,
         )
@@ -264,24 +267,132 @@ def create_project(
     }
 
 
+def init_project(
+    root: str | Path | None = None,
+    project: str | None = None,
+    *,
+    env: str | None = None,
+    log_retention: str | None = None,
+    cwd: str | Path | None = None,
+) -> dict[str, Any]:
+    """Select and verify an existing managed project without creating one."""
+    base = resolve_home(root)
+    selected = project or _project_from_cwd(base, cwd)
+    validate_project_name(selected)
+    project_root = _project_dir(base, selected)
+    _assert_managed_project_root(base, project_root)
+    if not project_root.is_dir():
+        msg = (
+            f"project not found: {selected!r}. "
+            f"Create it with: roi-h project create {selected}"
+        )
+        raise FileNotFoundError(msg)
+    _validate_project_manifest(project_root)
+    _ensure_project_roots(project_root)
+    if log_retention is not None:
+        configure_project(base, selected, log_retention=log_retention)
+
+    selected_env = _resolve_env(env, base / "config.json", selected)
+    home_cfg = _upgrade_home_config(_read_config(base / "config.json"))
+    home_cfg["active_project"] = selected
+    active_envs = dict(home_cfg.get("active_environments") or {})
+    active_envs[selected] = selected_env
+    home_cfg["active_environments"] = active_envs
+    _write_config(base / "config.json", home_cfg)
+    ws = Workspace.open(base, project=selected, env=selected_env)
+    return {
+        "ok": True,
+        "created": False,
+        "initialized": True,
+        "project": ws.project,
+        "project_id": ws.project_id,
+        "environment": ws.env,
+        "layout_version": ws.layout_version,
+        "structure": project_structure(ws)["entries"],
+    }
+
+
 def init_home(
     root: str | Path | None = None,
     *,
     project: str = _DEFAULT_PROJECT,
     display_name: str = "",
 ) -> dict[str, Any]:
-    """Ensure the data home has at least one version-4 project."""
-    base = _prepare_home(root)
-    existing = list_projects(base)
-    if existing:
-        active = get_active_project(base)
-        selected = active or str(existing[0]["name"])
-        if active is None:
-            set_active_project(base, selected)
-        ws = Workspace.open(base, project=selected)
-        return {"ok": True, "created": False, "projects": existing, **ws.to_dict()}
-    created = create_project(base, project, display_name=display_name or project, set_active=True)
-    return {**created, "projects": list_projects(base)}
+    """Compatibility wrapper for existing-project initialization."""
+    del display_name
+    return init_project(root, project)
+
+
+def configure_project(
+    root: str | Path | None,
+    project: str,
+    *,
+    log_retention: str,
+) -> dict[str, Any]:
+    """Atomically update supported project policy fields."""
+    base = resolve_home(root)
+    validate_project_name(project)
+    project_root = _project_dir(base, project)
+    _assert_managed_project_root(base, project_root)
+    with project_policy_lease(project_root):
+        config = _validate_project_manifest(project_root)
+        retention = dict(config.get("retention") or {})
+        retention["log_retention"] = validate_log_retention(log_retention)
+        config["retention"] = retention
+        atomic_write_json(_project_manifest_path(project_root), config, mode=0o600)
+    return {
+        "ok": True,
+        "project": project,
+        "log_retention": retention["log_retention"],
+    }
+
+
+def project_structure(workspace: Workspace) -> dict[str, Any]:
+    """Return the stable developer tree without absolute storage paths."""
+    env = workspace.env
+    runs = f"environments/{env}/runs"
+    return {
+        "view": "logical",
+        "project": workspace.project,
+        "project_id": workspace.project_id,
+        "environment": env,
+        "entries": [
+            {"path": "config/project.json", "storage": "project.json", "kind": "config"},
+            {"path": "reference/", "storage": "reference/", "kind": "reference"},
+            {"path": "skills/", "storage": "skills/", "kind": "project-skills"},
+            {
+                "path": "automations/",
+                "storage": "packages/automations/",
+                "kind": "automations",
+            },
+            {"path": "runs/", "storage": f"{runs}/", "kind": "runs"},
+            {
+                "path": "runs/<run-id>/run.json",
+                "storage": f"{runs}/<run-id>/run-files.json",
+                "kind": "run-manifest",
+            },
+            {
+                "path": "runs/<run-id>/input/",
+                "storage": f"{runs}/<run-id>/workspace/input/",
+                "kind": "run-input",
+            },
+            {
+                "path": "runs/<run-id>/output/",
+                "storage": f"{runs}/<run-id>/workspace/output/",
+                "kind": "run-output",
+            },
+            {
+                "path": "runs/<run-id>/screenshots/",
+                "storage": f"{runs}/<run-id>/artifacts/ (image artifacts)",
+                "kind": "screenshots",
+            },
+            {
+                "path": "runs/<run-id>/logs/",
+                "storage": f"{runs}/<run-id>/diagnostics/",
+                "kind": "run-logs",
+            },
+        ],
+    }
 
 
 def list_projects(root: str | Path | None = None) -> list[dict[str, Any]]:
@@ -322,16 +433,8 @@ def list_projects(root: str | Path | None = None) -> list[dict[str, Any]]:
 
 
 def set_active_project(root: str | Path | None, name: str) -> dict[str, Any]:
-    """Persist the active project as a local home preference."""
-    validate_project_name(name)
-    base = resolve_home(root)
-    if not _project_dir(base, name).is_dir():
-        msg = f"project not found: {name!r}"
-        raise FileNotFoundError(msg)
-    home_cfg = _upgrade_home_config(_read_config(base / "config.json"))
-    home_cfg["active_project"] = name
-    _write_config(base / "config.json", home_cfg)
-    return {"ok": True, **Workspace.open(base, project=name).to_dict()}
+    """Persist and verify the active project through the shared init seam."""
+    return init_project(root, name)
 
 
 def get_active_project(root: str | Path | None = None) -> str | None:
@@ -442,6 +545,15 @@ def rename_project(root: str | Path | None, name: str, new_name: str) -> dict[st
     return {"ok": True, "renamed": True, "from": name, "to": new_name, **ws.to_dict()}
 
 
+def validate_log_retention(value: str) -> str:
+    """Validate a project log-retention duration."""
+    normalized = value.strip().lower()
+    if normalized != "forever" and _LOG_RETENTION_RE.fullmatch(normalized) is None:
+        msg = "log retention must be forever or a positive day value of at most 9 digits"
+        raise ValueError(msg)
+    return normalized
+
+
 def validate_project_name(name: str) -> None:
     """Validate a portable project slug."""
     if name in _RESERVED_PROJECT_NAMES:
@@ -469,6 +581,79 @@ def _project_dir(home: Path, name: str) -> Path:
     return home / "projects" / name
 
 
+def _assert_managed_project_root(home: Path, project_root: Path) -> None:
+    projects = home / "projects"
+    if (
+        projects.is_symlink()
+        or project_root.is_symlink()
+        or project_root.resolve().parent != projects.resolve()
+    ):
+        msg = "project path must be a direct, non-symlink child of <ROI_H_HOME>/projects"
+        raise ValueError(msg)
+
+
+def _assert_safe_child(path: Path, root: Path) -> None:
+    current = path
+    while current != root:
+        if current.is_symlink():
+            msg = f"path.escape_denied: managed project path is a symlink: {path.name}"
+            raise RuntimeError(msg)
+        current = current.parent
+    try:
+        path.resolve().relative_to(root.resolve())
+    except ValueError as exc:
+        msg = f"path.escape_denied: managed project path escaped its project: {path.name}"
+        raise RuntimeError(msg) from exc
+
+
+def _project_from_cwd(home: Path, cwd: str | Path | None) -> str:
+    current = Path(cwd or Path.cwd()).expanduser().resolve()
+    projects = (home / "projects").resolve()
+    if current.parent != projects:
+        msg = "project name is required outside <ROI_H_HOME>/projects/<name>"
+        raise ValueError(msg)
+    return current.name
+
+
+def _validate_project_manifest(project_root: Path) -> dict[str, Any]:
+    path = _project_manifest_path(project_root)
+    _assert_safe_child(path, project_root)
+    config = _read_config(path)
+    if not project_root.is_dir():
+        msg = f"project not found: {project_root.name!r}"
+        raise FileNotFoundError(msg)
+    if not config:
+        msg = f"project manifest missing or invalid: {path}"
+        raise FileNotFoundError(msg)
+    if config.get("schema_version") != PROJECT_SCHEMA_VERSION:
+        msg = f"project manifest schema unsupported: {config.get('schema_version')!r}"
+        raise RuntimeError(msg)
+    if not str(config.get("project_id") or "").startswith("prj_"):
+        msg = f"project manifest has invalid project_id: {config.get('project_id')!r}"
+        raise ValueError(msg)
+    return config
+
+
+def _ensure_project_roots(project_root: Path) -> None:
+    for relative in (
+        ".locks",
+        "reference",
+        "skills",
+        "packages/automations",
+        "channels/dev",
+        "channels/prod",
+    ):
+        path = project_root / relative
+        _assert_safe_child(path, project_root)
+        path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    for env_name in sorted(_VALID_ENVS):
+        _ensure_environment_roots(
+            project_root / "environments" / env_name,
+            env_name,
+            containment_root=project_root,
+        )
+
+
 def _project_manifest_path(project_root: Path) -> Path:
     return project_root / "project.json"
 
@@ -491,10 +676,7 @@ def _resolve_project(explicit: str | None, home_config_path: Path, home: Path) -
     if len(projects) == 1:
         return str(projects[0]["name"])
     if not projects:
-        msg = (
-            f"no projects under {home}. "
-            "Create one with: roi-h rpa project create NAME  (or project init)"
-        )
+        msg = f"no projects under {home}. Create one with: roi-h project create NAME"
         raise FileNotFoundError(msg)
     msg = (
         f"no active project in {home_config_path}. "
@@ -541,7 +723,9 @@ def _prepare_home(root: str | Path | None) -> Path:
 
 def _ensure_home_roots(base: Path) -> None:
     for relative in ("projects", "skills", "diagnostics", "cache"):
-        (base / relative).mkdir(parents=True, exist_ok=True, mode=0o700)
+        path = base / relative
+        _assert_safe_child(path, base)
+        path.mkdir(parents=True, exist_ok=True, mode=0o700)
 
 
 def _assert_home_writable(base: Path) -> None:
@@ -555,15 +739,24 @@ def _assert_writable_directory(path: Path) -> None:
         raise PermissionError(errno.EACCES, f"directory is not writable: {path}", str(path))
 
 
-def _ensure_environment_roots(root: Path, env: str) -> None:
+def _ensure_environment_roots(
+    root: Path,
+    env: str,
+    *,
+    containment_root: Path,
+) -> None:
+    _assert_safe_child(root, containment_root)
     for relative in (
         "store",
         "runs",
         "runtime/locks",
         "runtime/browser-profiles",
     ):
-        (root / relative).mkdir(parents=True, exist_ok=True, mode=0o700)
+        path = root / relative
+        _assert_safe_child(path, containment_root)
+        path.mkdir(parents=True, exist_ok=True, mode=0o700)
     manifest = root / "environment.json"
+    _assert_safe_child(manifest, containment_root)
     if manifest.exists():
         config = _read_config(manifest)
         execution = config.get("execution")
@@ -640,14 +833,18 @@ __all__ = [
     "PROJECT_SCHEMA_VERSION",
     "EnvName",
     "Workspace",
+    "configure_project",
     "create_project",
     "delete_project",
     "get_active_project",
     "init_home",
+    "init_project",
     "list_projects",
+    "project_structure",
     "rename_project",
     "resolve_home",
     "set_active_env",
     "set_active_project",
+    "validate_log_retention",
     "validate_project_name",
 ]

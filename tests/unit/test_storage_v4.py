@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import sqlite3
 import zipfile
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from roi_h import RunSession
+from roi_h.harness.lease import project_policy_lease, run_lease
 from roi_h.harness.loader import default_skills_root
 from roi_h.harness.logical_paths import (
     LogicalPath,
@@ -24,7 +26,7 @@ from roi_h.harness.retention import RetentionPlanner
 from roi_h.harness.run_storage import RunStorage
 from roi_h.harness.secrets import get_secret, list_secrets, set_secret
 from roi_h.harness.store_lifecycle import StoreLifecycle
-from roi_h.harness.workspace import Workspace, create_project
+from roi_h.harness.workspace import Workspace, configure_project, create_project
 
 
 def _workspace(tmp_path: Path, *, project: str = "demo") -> Workspace:
@@ -176,17 +178,175 @@ def test_secret_values_are_environment_isolated_and_not_in_project_files(
     assert not (dev.project_root / "secrets.json").exists()
 
 
-def test_retention_requires_a_fresh_persisted_plan(tmp_path: Path) -> None:
+def test_retention_requires_a_fresh_plan_for_closed_run_logs(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     paths = RunStorage(workspace).prepare("cleanup-run")
-    (paths.tmp / "scratch.txt").write_text("delete later", encoding="utf-8")
+    log = paths.diagnostics / "worker.log"
+    log.write_text("delete later", encoding="utf-8")
+    manifest = json.loads(paths.manifest.read_text(encoding="utf-8"))
+    manifest.update(
+        state="terminal",
+        terminal_status="success",
+        finalized_at=(datetime.now(UTC) - timedelta(days=8)).isoformat(),
+    )
+    paths.manifest.write_text(json.dumps(manifest), encoding="utf-8")
+
     planner = RetentionPlanner()
     stale = planner.plan(workspace)
-    (paths.tmp / "new.txt").write_text("changed", encoding="utf-8")
+    log.write_text("changed", encoding="utf-8")
     with pytest.raises(RuntimeError, match=r"retention\.plan_stale"):
         planner.apply(workspace, stale.plan_id)
 
     fresh = planner.plan(workspace)
     result = planner.apply(workspace, fresh.plan_id)
     assert result.ok is True
-    assert list(paths.tmp.iterdir()) == []
+    assert list(paths.diagnostics.iterdir()) == []
+    assert paths.input.is_dir()
+    assert paths.output.is_dir()
+
+
+def test_retention_rejects_changed_policy_or_plan_target(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    paths = RunStorage(workspace).prepare("closed-run")
+    (paths.diagnostics / "worker.log").write_text("delete later", encoding="utf-8")
+    manifest = json.loads(paths.manifest.read_text(encoding="utf-8"))
+    manifest.update(
+        state="terminal",
+        terminal_status="success",
+        finalized_at=(datetime.now(UTC) - timedelta(days=8)).isoformat(),
+    )
+    paths.manifest.write_text(json.dumps(manifest), encoding="utf-8")
+    planner = RetentionPlanner()
+
+    policy_plan = planner.plan(workspace)
+    configure_project(workspace.root, workspace.project, log_retention="forever")
+    with pytest.raises(RuntimeError, match=r"retention\.plan_stale"):
+        planner.apply(workspace, policy_plan.plan_id)
+    assert (paths.diagnostics / "worker.log").is_file()
+
+    configure_project(workspace.root, workspace.project, log_retention="7d")
+    changed_plan = planner.plan(workspace)
+    plan_path = workspace.runtime / "retention-plans" / f"{changed_plan.plan_id}.json"
+    raw = json.loads(plan_path.read_text(encoding="utf-8"))
+    raw["targets"][0]["relative_path"] = "reference"
+    plan_path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(RuntimeError, match=r"retention\.plan_stale"):
+        planner.apply(workspace, changed_plan.plan_id)
+    assert workspace.reference.is_dir()
+    assert (paths.diagnostics / "worker.log").is_file()
+
+    metadata_plan = planner.plan(workspace)
+    metadata_path = workspace.runtime / "retention-plans" / f"{metadata_plan.plan_id}.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["project_id"] = "prj_forged"
+    metadata["bytes"] = 1
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    with pytest.raises(RuntimeError, match=r"retention\.plan_stale"):
+        planner.apply(workspace, metadata_plan.plan_id)
+
+
+def test_retention_fingerprint_and_lease_protect_run_logs(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    paths = RunStorage(workspace).prepare("closed-run")
+    first = paths.diagnostics / "first.log"
+    second = paths.diagnostics / "second.log"
+    first.write_text("aaaa", encoding="utf-8")
+    second.write_text("bbbb", encoding="utf-8")
+    manifest = json.loads(paths.manifest.read_text(encoding="utf-8"))
+    manifest.update(
+        state="terminal",
+        terminal_status="success",
+        finalized_at=(datetime.now(UTC) - timedelta(days=8)).isoformat(),
+    )
+    paths.manifest.write_text(json.dumps(manifest), encoding="utf-8")
+    planner = RetentionPlanner()
+
+    changed = planner.plan(workspace)
+    first.write_text("cccc", encoding="utf-8")
+    with pytest.raises(RuntimeError, match=r"retention\.plan_stale"):
+        planner.apply(workspace, changed.plan_id)
+
+    changed_tree = planner.plan(workspace)
+    (paths.diagnostics / "empty").mkdir()
+    with pytest.raises(RuntimeError, match=r"retention\.plan_stale"):
+        planner.apply(workspace, changed_tree.plan_id)
+    (paths.diagnostics / "empty").rmdir()
+
+    locked = planner.plan(workspace)
+    with run_lease(workspace, "closed-run"), pytest.raises(RuntimeError, match="lease is busy"):
+        planner.apply(workspace, locked.plan_id)
+
+    with project_policy_lease(workspace.project_root):
+        with pytest.raises(RuntimeError, match="lease is busy"):
+            planner.apply(workspace, locked.plan_id)
+        with pytest.raises(RuntimeError, match="lease is busy"):
+            configure_project(workspace.root, workspace.project, log_retention="forever")
+
+
+def test_run_lease_rejects_symlink_without_changing_target(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    target = tmp_path / "target.txt"
+    target.write_text("keep", encoding="utf-8")
+    lock = workspace.runtime / "locks" / "run-closed-run.lock"
+    lock.symlink_to(target)
+
+    with (
+        pytest.raises(RuntimeError, match="must not be a symlink"),
+        run_lease(workspace, "closed-run"),
+    ):
+        pytest.fail("symlinked lease was acquired")
+    assert target.read_text(encoding="utf-8") == "keep"
+
+
+def test_reopen_marks_terminal_workspace_active_before_retention(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    session = RunSession.create(
+        workspace,
+        run_id="reopened-run",
+        skills_root=default_skills_root(),
+    )
+    session.start_run("reopen")
+    storage = RunStorage(workspace)
+    paths = storage.finalize("reopened-run", status="success")
+    run_paths = storage.paths("reopened-run")
+    (run_paths.diagnostics / "worker.log").write_text("keep", encoding="utf-8")
+    manifest = json.loads(run_paths.manifest.read_text(encoding="utf-8"))
+    manifest["finalized_at"] = (datetime.now(UTC) - timedelta(days=8)).isoformat()
+    run_paths.manifest.write_text(json.dumps(manifest), encoding="utf-8")
+    plan = RetentionPlanner().plan(workspace)
+    assert plan.targets
+    assert paths["ok"] is True
+    assert session.runtime.graph.store is not None
+    session.runtime.graph.store.close()
+
+    RunSession.reopen(
+        workspace,
+        run_id="reopened-run",
+        skills_root=default_skills_root(),
+    )
+
+    active = json.loads(run_paths.manifest.read_text(encoding="utf-8"))
+    assert active["state"] == "active"
+    with pytest.raises(RuntimeError, match=r"retention\.plan_stale"):
+        RetentionPlanner().apply(workspace, plan.plan_id)
+    assert (run_paths.diagnostics / "worker.log").is_file()
+
+
+def test_retention_never_plans_active_or_forever_run_logs(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    active = RunStorage(workspace).prepare("active-run")
+    (active.diagnostics / "worker.log").write_text("keep", encoding="utf-8")
+    assert RetentionPlanner().plan(workspace).targets == ()
+
+    closed = RunStorage(workspace).prepare("closed-run")
+    (closed.diagnostics / "worker.log").write_text("keep", encoding="utf-8")
+    manifest = json.loads(closed.manifest.read_text(encoding="utf-8"))
+    manifest.update(
+        state="terminal",
+        terminal_status="success",
+        finalized_at=(datetime.now(UTC) - timedelta(days=100)).isoformat(),
+    )
+    closed.manifest.write_text(json.dumps(manifest), encoding="utf-8")
+    configure_project(workspace.root, workspace.project, log_retention="forever")
+
+    assert RetentionPlanner().plan(workspace).targets == ()
