@@ -63,6 +63,12 @@ def _build_test_roi_h_wheel(
             f"{active_check}"
             f"        print(json.dumps({{'ok': ok, 'version': '{version}'}}))\n"
             "        return 0\n"
+            '    if sys.argv[1:] == ["instructions", "--install", "--output", "json"]:\n'
+            "        marker = Path(os.environ['ROI_H_INSTALL_ROOT']) / "
+            "'agent-instructions-installed'\n"
+            f"        marker.write_text({version!r}, encoding='utf-8')\n"
+            "        print(json.dumps({'ok': True, 'changed': True}))\n"
+            "        return 0\n"
             "    if Path(sys.argv[0]).name == 'playwright' and "
             "sys.argv[1:] == ['install', 'chromium']:\n"
             "        browser_root = Path(os.environ['PLAYWRIGHT_BROWSERS_PATH'])\n"
@@ -263,6 +269,7 @@ def test_plan_initial_install_from_local_trusted_release_without_writing(
         EffectKind.CREATE_INSTALL_ROOT,
         EffectKind.CREATE_VERSION,
         EffectKind.INSTALL_BROWSER,
+        EffectKind.INSTALL_AGENT_INSTRUCTIONS,
         EffectKind.INSTALL_LAUNCHER,
         EffectKind.ACTIVATE_VERSION,
     }
@@ -377,6 +384,9 @@ def test_apply_initial_install_activates_only_after_offline_doctor(
     assert (install_root / "browsers" / "chromium-test" / "READY").read_text(
         encoding="utf-8"
     ) == "ready"
+    assert (install_root / "agent-instructions-installed").read_text(
+        encoding="utf-8"
+    ) == _TEST_VERSION
     record = install_root / "transactions" / f"{result.transaction_id}.json"
     assert json.loads(record.read_text(encoding="utf-8"))["status"] == "complete"
 
@@ -608,6 +618,7 @@ def test_managed_update_activates_new_version_and_retains_old_version(
     assert marker.read_text(encoding="utf-8") == "keep"
     saved_state = json.loads((install_root / "install-state.json").read_text(encoding="utf-8"))
     assert saved_state["active_version"] == "0.2.0"
+    assert (install_root / "agent-instructions-installed").read_text(encoding="utf-8") == "0.2.0"
 
 
 def test_same_selected_version_returns_no_change_without_reinstall(tmp_path: Path) -> None:
@@ -776,6 +787,7 @@ def test_windows_install_uses_an_atomic_pointer_file_without_symlinks(
     monkeypatch.setattr(installer_core, "_install_wheelhouse", lambda *_args: None)
     monkeypatch.setattr(installer_core, "_install_browser", lambda *_args: None)
     monkeypatch.setattr(installer_core, "_run_staged_doctor", lambda *_args: None)
+    monkeypatch.setattr(installer_core, "_install_agent_instructions", lambda *_args: None)
 
     result = apply(plan(install_request))
 
@@ -803,6 +815,7 @@ def test_windows_update_failure_restores_pointer_file_and_state(
     monkeypatch.setattr(installer_core, "_install_wheelhouse", lambda *_args: None)
     monkeypatch.setattr(installer_core, "_install_browser", lambda *_args: None)
     monkeypatch.setattr(installer_core, "_run_staged_doctor", lambda *_args: None)
+    monkeypatch.setattr(installer_core, "_install_agent_instructions", lambda *_args: None)
     install_request, _ = _make_release_request(
         tmp_path,
         install_root,

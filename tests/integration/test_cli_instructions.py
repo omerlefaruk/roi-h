@@ -1,0 +1,71 @@
+"""Public CLI tests for global AI-agent instructions."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+
+def _run(*arguments: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603
+        [sys.executable, "-m", "roi_h", *arguments],
+        cwd=cwd,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def test_instructions_install_preserves_existing_text_and_is_idempotent(
+    tmp_path: Path,
+) -> None:
+    user_home = tmp_path / "customer"
+    codex_file = user_home / ".codex" / "AGENTS.md"
+    agents_file = user_home / ".agents" / "AGENTS.md"
+    codex_file.parent.mkdir(parents=True)
+    codex_file.write_text("# Customer rules\n\nKeep this text.\n", encoding="utf-8")
+
+    first = _run(
+        "instructions",
+        "--install",
+        "--user-home",
+        str(user_home),
+        "--output",
+        "json",
+        cwd=tmp_path,
+    )
+    second = _run(
+        "instructions",
+        "--install",
+        "--user-home",
+        str(user_home),
+        "--output",
+        "json",
+        cwd=tmp_path,
+    )
+
+    assert first.returncode == 0, first.stdout
+    assert second.returncode == 0, second.stdout
+    assert first.stderr == second.stderr == ""
+    assert json.loads(first.stdout)["changed"] is True
+    assert json.loads(second.stdout)["changed"] is False
+    for path in (codex_file, agents_file):
+        text = path.read_text(encoding="utf-8")
+        assert text.count("<!-- ROI-H instructions: begin -->") == 1
+        assert text.count("<!-- ROI-H instructions: end -->") == 1
+        assert "`roi-h agent context`" in text
+        assert "`roi-h agent describe`" in text
+    assert codex_file.read_text(encoding="utf-8").startswith(
+        "# Customer rules\n\nKeep this text.\n"
+    )
+
+
+def test_instructions_command_prints_the_managed_block(tmp_path: Path) -> None:
+    completed = _run("instructions", cwd=tmp_path)
+
+    assert completed.returncode == 0
+    assert completed.stderr == ""
+    assert completed.stdout.startswith("<!-- ROI-H instructions: begin -->\n")
+    assert completed.stdout.endswith("<!-- ROI-H instructions: end -->\n")

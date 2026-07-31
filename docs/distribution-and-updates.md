@@ -31,16 +31,18 @@ state belong in the ROI-H data home.
 
 ## Local qualification
 
-Run the complete qualification from the repository root:
+Run the package qualification from the repository root:
 
 ```shell
 uv run python scripts/qualify_release.py
 ```
 
-The command checks the publication boundary, shell syntax when available, the locked Python
-and installer environments, compilation, lint, formatting, type checks, tests, fresh build
-artifacts, package identity, and Twine metadata. It must pass before a tag or release is
-published.
+The command checks the publication boundary, locked Python environment, focused package
+tests, fresh build artifacts, package identity, and Twine metadata. It must pass before a
+tag or release is published.
+
+Use `uv run python scripts/qualify_release.py --full` when complete installer and
+application qualification is required.
 
 ## GitHub release
 

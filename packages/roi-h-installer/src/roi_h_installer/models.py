@@ -61,6 +61,7 @@ class EffectKind(StrEnum):
     CREATE_INSTALL_ROOT = "create_install_root"
     CREATE_VERSION = "create_version"
     INSTALL_BROWSER = "install_browser"
+    INSTALL_AGENT_INSTRUCTIONS = "install_agent_instructions"
     INSTALL_LAUNCHER = "install_launcher"
     ACTIVATE_VERSION = "activate_version"
 
@@ -85,6 +86,7 @@ class InstallerErrorCode(StrEnum):
     ENVIRONMENT_CREATE_FAILED = "environment.create_failed"
     DEPENDENCY_INSTALL_FAILED = "dependency.install_failed"
     BROWSER_INSTALL_FAILED = "browser.install_failed"
+    AGENT_INSTRUCTIONS_FAILED = "agent_instructions.failed"
     DOCTOR_FAILED = "doctor.failed"
     UPDATE_PLAN_STALE = "update.plan_stale"
     UPDATE_ACTIVATION_FAILED = "update.activation_failed"

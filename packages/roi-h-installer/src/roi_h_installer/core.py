@@ -354,6 +354,13 @@ def _plan_effects(
             kind=EffectKind.ACTIVATE_VERSION,
             target=str(install_root / "current"),
         ),
+        *(
+            PlanEffect(
+                kind=EffectKind.INSTALL_AGENT_INSTRUCTIONS,
+                target=str(target),
+            )
+            for target in _agent_instruction_targets()
+        ),
     ]
     if operation is InstallOperation.INSTALL:
         effects.insert(
@@ -494,6 +501,7 @@ def _execute_initial_install(
     )
     active_environment = paths.final_environment if _is_windows() else paths.pointer
     _run_staged_doctor(active_environment, install_plan)
+    _install_agent_instructions(active_environment, install_plan)
     _write_json_atomic(
         paths.record_file,
         {
@@ -797,6 +805,45 @@ def _run_staged_doctor(staged_environment: Path, install_plan: InstallPlan) -> N
             ErrorCategory.INTERNAL,
             "The staged ROI-H doctor check failed.",
             "Inspect the failed transaction record and correct the release.",
+        )
+
+
+def _agent_instruction_targets() -> tuple[Path, Path]:
+    user_home = Path.home()
+    configured_codex_home = os.environ.get("CODEX_HOME")
+    codex_home = (
+        Path(configured_codex_home).expanduser() if configured_codex_home else user_home / ".codex"
+    )
+    return codex_home / "AGENTS.md", user_home / ".agents" / "AGENTS.md"
+
+
+def _install_agent_instructions(
+    active_environment: Path,
+    install_plan: InstallPlan,
+) -> None:
+    environment = os.environ.copy()
+    environment["ROI_H_INSTALL_ROOT"] = str(install_plan.install_root)
+    environment["ROI_H_HOME"] = str(install_plan.data_home)
+    completed = _run_process(
+        [
+            str(_environment_cli(active_environment)),
+            "instructions",
+            "--install",
+            "--output",
+            "json",
+        ],
+        environment=environment,
+    )
+    try:
+        output: Any = json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        output = None
+    if completed.returncode != 0 or not isinstance(output, dict) or output.get("ok") is not True:
+        raise _fail(
+            InstallerErrorCode.AGENT_INSTRUCTIONS_FAILED,
+            ErrorCategory.INTERNAL,
+            "The ROI-H agent instructions could not be installed.",
+            "Run `roi-h instructions --install` after the installation is repaired.",
         )
 
 
