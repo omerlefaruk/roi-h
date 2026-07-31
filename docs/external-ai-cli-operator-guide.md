@@ -136,6 +136,29 @@ The second human command uses a hidden terminal prompt.
 The operation manifest is the authority for effects, approvals, idempotency, secret
 inputs, pagination, and timeouts.
 
+## Installed agent instructions
+
+The managed installer adds one marked ROI-H block to the user-level instruction files:
+
+- `<CODEX_HOME>/AGENTS.md` when `CODEX_HOME` is set, otherwise
+  `<user-home>/.codex/AGENTS.md`; and
+- `<user-home>/.agents/AGENTS.md`.
+
+Existing text stays unchanged. Install and update replace only the marked ROI-H block, so
+repeated installation does not create duplicate instructions. The block tells agents to
+start with `roi-h agent context` and `roi-h agent describe`; it does not copy operation
+schemas or contain project names, paths, customer data, or secrets.
+
+Show the managed block or repair both files with:
+
+```shell
+roi-h instructions
+roi-h instructions --install
+```
+
+An AI agent reads these files only when its host supports that instruction location.
+The live ROI-H manifest remains the authority after instruction discovery.
+
 ## Skill contract
 
 A `SKILL.md` file contains only guidance that the live manifest cannot express:

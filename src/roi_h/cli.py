@@ -20,6 +20,12 @@ from activegraph.store.sqlite import SQLiteEventStore
 from roi_h import __version__
 from roi_h.agent.cli import main as agent_main
 from roi_h.agent.human_adapter import call_operation as _call_operation
+from roi_h.agent_instructions import (
+    INSTRUCTIONS_VERSION,
+    MANAGED_INSTRUCTIONS,
+    install_agent_instructions,
+    instruction_paths,
+)
 from roi_h.harness import RunSession
 from roi_h.harness.automation import list_automations
 from roi_h.harness.custom import define_project_tool
@@ -137,6 +143,34 @@ def _cmd_update(args: argparse.Namespace) -> dict[str, Any]:
     return cast("dict[str, Any]", payload)
 
 
+def _cmd_instructions(args: argparse.Namespace) -> dict[str, Any] | None:
+    user_home = Path(args.user_home).expanduser().resolve() if args.user_home is not None else None
+    if not args.install:
+        if args.output == "json":
+            return {
+                "ok": True,
+                "version": INSTRUCTIONS_VERSION,
+                "instructions": MANAGED_INSTRUCTIONS,
+                "files": [str(path) for path in instruction_paths(user_home)],
+            }
+        sys.stdout.write(f"{MANAGED_INSTRUCTIONS}\n")
+        return None
+
+    files = install_agent_instructions(user_home)
+    payload = {
+        "ok": True,
+        "version": INSTRUCTIONS_VERSION,
+        "changed": any(changed for _, changed in files),
+        "files": [{"path": str(path), "changed": changed} for path, changed in files],
+    }
+    if args.output == "json":
+        return payload
+    for path, changed in files:
+        status = "updated" if changed else "unchanged"
+        sys.stdout.write(f"{status}: {path}\n")
+    return None
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Entry point for ``roi-h`` / ``python -m roi_h``."""
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
@@ -189,6 +223,22 @@ def _build_parser() -> argparse.ArgumentParser:
     version_command = sub.add_parser("version", help="Show the installed ROI-H version")
     version_command.add_argument("--output", choices=["text", "json"], default="text")
     version_command.set_defaults(handler=_cmd_version)
+    instructions = sub.add_parser(
+        "instructions",
+        help="Show or install global ROI-H instructions for AI agents",
+    )
+    instructions.add_argument(
+        "--install",
+        action="store_true",
+        help="Install or update the managed block in user-level agent files",
+    )
+    instructions.add_argument(
+        "--user-home",
+        default=None,
+        help="Target user home (default: current user)",
+    )
+    instructions.add_argument("--output", choices=["text", "json"], default="text")
+    instructions.set_defaults(handler=_cmd_instructions)
     doctor = sub.add_parser("doctor", help="Inspect installation health without repair")
     doctor.add_argument("--install-root", default=str(default_install_root()))
     doctor.add_argument("--home", default=None)
