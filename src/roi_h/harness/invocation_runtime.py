@@ -608,6 +608,17 @@ def _worker_environment(
     )
     env.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(managed_browser_root()))
     env.setdefault("PLAYWRIGHT_SKIP_BROWSER_GC", "1")
+    if workspace.env == "dev" and skill_tool.skill == "browser":
+        browser_state = paths.runtime / "browser-session.json"
+        headed = True
+        if browser_state.is_file():
+            try:
+                recorded = json.loads(browser_state.read_text(encoding="utf-8")).get("headed")
+            except (OSError, json.JSONDecodeError):
+                recorded = None
+            if isinstance(recorded, bool):
+                headed = recorded
+        env.setdefault("ROI_H_BROWSER_HEADED", "1" if headed else "0")
     env.update(
         {
             "ROI_H_HOME": str(workspace.root),

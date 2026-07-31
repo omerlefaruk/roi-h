@@ -177,6 +177,52 @@ def test_agent_run_tool_and_approval_rejection_journey(tmp_path: Path) -> None:
     assert rejected.returncode == 0, rejected.stdout
     assert json.loads(rejected.stdout)["result"]["status"] == "denied"
 
+    required = _call(
+        "tool.invoke",
+        {
+            "schema_version": "1.0",
+            "idempotency_key": "request-required-approval",
+            "context": {
+                "project": "demo",
+                "environment": "dev",
+                "run_id": "agent-approval-run",
+            },
+            "arguments": {
+                "home": home,
+                "name": "approval.request",
+                "arguments": {"value": "Require approval."},
+                "approval_mode": "required",
+                "auto_approve": True,
+                "force": True,
+            },
+        },
+        cwd=tmp_path,
+    )
+    assert required.returncode == 0, required.stdout
+    assert json.loads(required.stdout)["result"]["status"] == "pending_approval"
+
+    full = _call(
+        "tool.invoke",
+        {
+            "schema_version": "1.0",
+            "idempotency_key": "request-full-approval",
+            "context": {
+                "project": "demo",
+                "environment": "dev",
+                "run_id": "agent-approval-run",
+            },
+            "arguments": {
+                "home": home,
+                "name": "approval.request",
+                "arguments": {"value": "Run without a pending approval."},
+                "approval_mode": "full",
+            },
+        },
+        cwd=tmp_path,
+    )
+    assert full.returncode == 0, full.stdout
+    assert json.loads(full.stdout)["result"]["status"] == "ok"
+
     events = _call(
         "run.events",
         {
@@ -192,4 +238,4 @@ def test_agent_run_tool_and_approval_rejection_journey(tmp_path: Path) -> None:
     )
     event_types = {item["type"] for item in json.loads(events.stdout)["result"]["items"]}
     assert "approval.rejected" in event_types
-    assert "tool.requested" not in event_types
+    assert "tool.requested" in event_types

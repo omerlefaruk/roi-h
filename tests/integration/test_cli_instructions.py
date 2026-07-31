@@ -57,6 +57,7 @@ def test_instructions_install_preserves_existing_text_and_is_idempotent(
         assert text.count("<!-- ROI-H instructions: end -->") == 1
         assert "`roi-h agent context`" in text
         assert "`roi-h agent describe`" in text
+        assert '`approval_mode: "full"`' in text
     assert codex_file.read_text(encoding="utf-8").startswith(
         "# Customer rules\n\nKeep this text.\n"
     )

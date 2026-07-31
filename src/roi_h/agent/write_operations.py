@@ -161,7 +161,13 @@ def run_start(request: CommandRequest) -> dict[str, Any]:
 
 def tool_invoke(request: CommandRequest) -> dict[str, Any]:
     """Invoke one tool with caller-controlled ActiveGraph identity."""
-    session = _session(request)
+    approval_mode = request.arguments.get("approval_mode")
+    full_approval = (
+        approval_mode == "full"
+        if approval_mode is not None
+        else request.arguments.get("auto_approve") is True
+    )
+    session = _session(request, auto_approve=full_approval)
     name = str(request.arguments.get("name") or "")
     skill, separator, tool = name.partition(".")
     if not separator or not skill or not tool:
@@ -202,7 +208,7 @@ def tool_invoke(request: CommandRequest) -> dict[str, Any]:
         tool,
         supplied,
         actor=str(request.arguments.get("actor") or "ai"),
-        force=request.arguments.get("force") is True,
+        force=approval_mode is None and request.arguments.get("force") is True,
         identity=identity,
     )
     return result.model_dump(mode="json")
@@ -235,7 +241,11 @@ def _workspace(request: CommandRequest) -> Workspace:
     )
 
 
-def _session(request: CommandRequest) -> RunSession:
+def _session(
+    request: CommandRequest,
+    *,
+    auto_approve: bool = False,
+) -> RunSession:
     run_id = request.context.run_id or request.arguments.get("run_id")
     if not isinstance(run_id, str) or not run_id:
         msg = "run_id is required"
@@ -244,7 +254,7 @@ def _session(request: CommandRequest) -> RunSession:
         _workspace(request),
         run_id=run_id,
         skills_root=request.arguments.get("skills"),
-        auto_approve=False,
+        auto_approve=auto_approve,
     )
 
 

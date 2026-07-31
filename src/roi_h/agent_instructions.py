@@ -7,7 +7,7 @@ from pathlib import Path
 
 from roi_h.harness.atomicfs import atomic_write_text
 
-INSTRUCTIONS_VERSION = 1
+INSTRUCTIONS_VERSION = 2
 BEGIN_MARKER = "<!-- ROI-H instructions: begin -->"
 END_MARKER = "<!-- ROI-H instructions: end -->"
 MANAGED_INSTRUCTIONS = f"""\
@@ -24,8 +24,11 @@ When a task uses ROI-H:
   idempotency, plans, secrets, pagination, tasks, and time limits.
 - Use a stable idempotency key for each write. Retry a lost write with the same operation,
   context, arguments, and key.
-- Do not approve a pending effect for the user. Show the effect and ask for approval.
-- Use the related `.plan` operation before a destructive `.apply` operation.
+- Use `approval_mode: "full"` on `tool.invoke` only when the user explicitly gives
+  full or unattended authority for that scope. Otherwise, show each pending effect and
+  ask for approval.
+- Full tool approval does not bypass production policy, secret handling, or destructive
+  plans. Use the related `.plan` operation before a destructive `.apply` operation.
 - Never put secret values in prompts, JSON, arguments, logs, plans, or files. Use the
   secure standard-input channel.
 - For product tasks, do not bypass ROI-H with direct browser, shell, network, file, or
