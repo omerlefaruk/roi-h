@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-_PUBLIC_SKILLS = {"browser", "excel", "files", "pdf"}
+_PUBLIC_SKILLS = {"browser", "codex_chrome", "excel", "files", "pdf"}
 
 
 def test_wheel_contains_only_roi_h_and_distribution_metadata(tmp_path: Path) -> None:
