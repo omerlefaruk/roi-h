@@ -1,7 +1,8 @@
-"""Run the complete ROI-H release qualification on the maintainer's machine."""
+"""Run fast Python package checks or the complete ROI-H release qualification."""
 
 from __future__ import annotations
 
+import argparse
 import shutil
 import subprocess
 import sys
@@ -12,6 +13,11 @@ INSTALLER_PROJECT = REPOSITORY / "packages" / "roi-h-installer"
 INSTALLER_DISTRIBUTION = REPOSITORY / "dist" / "installer"
 PYTHON_VERSION = "3.12"
 EXPECTED_ARTIFACT_COUNT = 2
+PACKAGE_TESTS = (
+    "tests/unit/test_publication_boundary.py",
+    "tests/unit/test_release_identity.py",
+    "tests/integration/test_packaging.py",
+)
 
 
 def _run(command: list[str]) -> None:
@@ -43,8 +49,28 @@ def _distribution_artifacts(
     return [str(path) for path in artifacts]
 
 
-def main() -> int:
-    """Qualify the supported Python runtime and build release artifacts once."""
+def _package_qualification() -> None:
+    """Build and verify the Python package without installer checks."""
+    _run([sys.executable, "scripts/check_publication_boundary.py"])
+    _run(["uv", "sync", "--locked", "--python", PYTHON_VERSION, "--group", "dev"])
+    _uv_run(PYTHON_VERSION, "python", "-m", "pytest", *PACKAGE_TESTS)
+    _run(["uv", "build", "--python", PYTHON_VERSION, "--clear", "--no-sources"])
+    distribution = _distribution_artifacts()
+    _run(
+        [
+            sys.executable,
+            "scripts/check_release_identity.py",
+            "--project",
+            "pyproject.toml",
+            *[item for artifact in distribution for item in ("--artifact", artifact)],
+        ],
+    )
+    for artifact in distribution:
+        _uv_run(PYTHON_VERSION, "python", "-m", "twine", "check", artifact)
+
+
+def _full_qualification() -> int:
+    """Qualify the supported runtime, installer, and release artifacts."""
     _run([sys.executable, "scripts/check_publication_boundary.py"])
     shell = shutil.which("sh")
     if shell is None:
@@ -135,6 +161,26 @@ def main() -> int:
     ):
         _uv_run(PYTHON_VERSION, "python", "-m", "twine", "check", *distribution)
     sys.stdout.write("\nROI-H release qualification: PASSED\n")
+    return 0
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="also run installer checks and the complete application test suite",
+    )
+    return parser
+
+
+def main() -> int:
+    """Run the default fast package qualification or the complete suite."""
+    args = _parser().parse_args()
+    if args.full:
+        return _full_qualification()
+    _package_qualification()
+    sys.stdout.write("\nROI-H package release qualification: PASSED\n")
     return 0
 
 

@@ -12,6 +12,8 @@ the [product direction](docs/product-direction.md).
 ```shell
 uv sync --locked --group dev
 uv run python scripts/qualify_release.py
+# use --full for installer and complete application checks
+uv run python scripts/qualify_release.py --full
 ```
 
 User projects, artifacts, browser state, databases, secrets, and custom automations belong
