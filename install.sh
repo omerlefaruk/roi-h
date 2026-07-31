@@ -5,9 +5,9 @@ set -eu
 UV_VERSION="0.11.16"
 UV_INSTALLER_SHA256="b9f925505899533f36a3acfdf8684c661ff2d5c8735f759fca768367b5996123"
 PYTHON_VERSION="3.12.13"
-DEFAULT_INSTALLER_VERSION="0.1.1"
-DEFAULT_RELEASE_BUNDLE_URL="https://github.com/omerlefaruk/roi-h/releases/download/v0.1.1/roi-h-release-0.1.1.tar.gz"
-DEFAULT_RELEASE_BUNDLE_SHA256="089bd6a7cd9f56b65d2e9dcef209aeb63f0f8c93a4dc9c057f479f7bcd90872d"
+DEFAULT_INSTALLER_VERSION="0.1.4"
+DEFAULT_RELEASE_BUNDLE_URL="https://github.com/omerlefaruk/roi-h/releases/download/v0.1.8/roi-h-release-0.1.8.tar.gz"
+DEFAULT_RELEASE_BUNDLE_SHA256="3ec60498974a95eda648e3ad01143833c91a44a69bcd3f1b4c5199bb922a8b0a"
 
 fail() {
     printf 'ROI-H install failed: %s\n' "$1" >&2
@@ -23,7 +23,7 @@ case "$platform" in
     Darwin:arm64 | Darwin:aarch64)
         ;;
     *)
-        fail "ROI-H 0.1.1 supports only macOS ARM64. Detected $platform."
+        fail "ROI-H 0.1.8 supports only macOS ARM64. Detected $platform."
         ;;
 esac
 

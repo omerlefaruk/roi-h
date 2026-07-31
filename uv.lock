@@ -633,7 +633,7 @@ wheels = [
 
 [[package]]
 name = "roi-h"
-version = "0.1.7"
+version = "0.1.8"
 source = { editable = "." }
 dependencies = [
     { name = "activegraph" },

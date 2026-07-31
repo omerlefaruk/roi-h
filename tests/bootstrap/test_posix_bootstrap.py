@@ -17,11 +17,11 @@ def test_posix_bootstrap_has_a_complete_stable_release_identity() -> None:
 
     assert (
         'DEFAULT_RELEASE_BUNDLE_URL="https://github.com/omerlefaruk/roi-h/releases/'
-        'download/v0.1.1/roi-h-release-0.1.1.tar.gz"' in script
+        'download/v0.1.8/roi-h-release-0.1.8.tar.gz"' in script
     )
     assert (
         'DEFAULT_RELEASE_BUNDLE_SHA256="'
-        '089bd6a7cd9f56b65d2e9dcef209aeb63f0f8c93a4dc9c057f479f7bcd90872d"' in script
+        '3ec60498974a95eda648e3ad01143833c91a44a69bcd3f1b4c5199bb922a8b0a"' in script
     )
 
 
