@@ -12,6 +12,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
 PUBLIC_SKILLS = frozenset({"browser", "codex_chrome", "excel", "files", "pdf"})
+PUBLIC_AGENT_SKILLS = frozenset({"migrate-code-automation"})
+_AGENT_SKILL_PART = 3
 _HISTORICAL_PUBLIC_SKILL_FILES = frozenset(
     {
         "skills/feedback/SKILL.md",
@@ -96,7 +98,11 @@ def publication_violations(paths: Iterable[str], *, history: bool = False) -> li
         if Path(path).name in _FORBIDDEN_FILE_NAMES or path.endswith(_FORBIDDEN_SUFFIXES):
             violations.append(path)
             continue
-        if path.startswith("skills/"):
+        if path.startswith("src/roi_h/_agent_skills/"):
+            skill = parts[_AGENT_SKILL_PART] if len(parts) > _AGENT_SKILL_PART else ""
+            if skill and skill not in PUBLIC_AGENT_SKILLS:
+                violations.append(path)
+        elif path.startswith("skills/"):
             skill = parts[1] if len(parts) > 1 else ""
             retired_public_file = history and path in _HISTORICAL_PUBLIC_SKILL_FILES
             if (

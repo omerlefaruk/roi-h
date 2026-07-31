@@ -36,6 +36,8 @@ from roi_h_installer.models import (
 )
 
 _DIGEST_SIZE = 16
+_AGENT_SKILL_NAME = "migrate-code-automation"
+_AGENT_SKILL_FILES = ("SKILL.md", "agents/openai.yaml")
 _VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$")
 
 
@@ -361,6 +363,13 @@ def _plan_effects(
             )
             for target in _agent_instruction_targets()
         ),
+        *(
+            PlanEffect(
+                kind=EffectKind.INSTALL_AGENT_SKILL,
+                target=str(target),
+            )
+            for target in _agent_skill_targets()
+        ),
     ]
     if operation is InstallOperation.INSTALL:
         effects.insert(
@@ -501,7 +510,6 @@ def _execute_initial_install(
     )
     active_environment = paths.final_environment if _is_windows() else paths.pointer
     _run_staged_doctor(active_environment, install_plan)
-    _install_agent_instructions(active_environment, install_plan)
     _write_json_atomic(
         paths.record_file,
         {
@@ -513,6 +521,7 @@ def _execute_initial_install(
             "installed_version": install_plan.requested_version,
         },
     )
+    _install_agent_instructions(active_environment, install_plan)
 
 
 def _assert_final_version_missing(final_environment: Path) -> None:
@@ -815,6 +824,14 @@ def _agent_instruction_targets() -> tuple[Path, Path]:
         Path(configured_codex_home).expanduser() if configured_codex_home else user_home / ".codex"
     )
     return codex_home / "AGENTS.md", user_home / ".agents" / "AGENTS.md"
+
+
+def _agent_skill_targets() -> tuple[Path, ...]:
+    return tuple(
+        instruction.parent / "skills" / _AGENT_SKILL_NAME / relative
+        for instruction in _agent_instruction_targets()
+        for relative in _AGENT_SKILL_FILES
+    )
 
 
 def _install_agent_instructions(

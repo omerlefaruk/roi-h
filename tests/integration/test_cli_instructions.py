@@ -58,9 +58,40 @@ def test_instructions_install_preserves_existing_text_and_is_idempotent(
         assert "`roi-h agent context`" in text
         assert "`roi-h agent describe`" in text
         assert '`approval_mode: "full"`' in text
+        assert "inspect user-supplied source files" in text
+    for root in (user_home / ".codex", user_home / ".agents"):
+        skill = root / "skills" / "migrate-code-automation"
+        assert "name: migrate-code-automation" in (skill / "SKILL.md").read_text(encoding="utf-8")
+        assert "$migrate-code-automation" in (skill / "agents" / "openai.yaml").read_text(
+            encoding="utf-8"
+        )
+    assert len(json.loads(first.stdout)["files"]) == 6
     assert codex_file.read_text(encoding="utf-8").startswith(
         "# Customer rules\n\nKeep this text.\n"
     )
+
+
+def test_instructions_install_preserves_an_unmanaged_skill(tmp_path: Path) -> None:
+    user_home = tmp_path / "customer"
+    skill_file = user_home / ".codex" / "skills" / "migrate-code-automation" / "SKILL.md"
+    skill_file.parent.mkdir(parents=True)
+    skill_file.write_text("# Customer skill\n", encoding="utf-8")
+
+    completed = _run(
+        "instructions",
+        "--install",
+        "--user-home",
+        str(user_home),
+        "--output",
+        "json",
+        cwd=tmp_path,
+    )
+
+    assert completed.returncode == 1
+    assert "unmanaged agent skill already exists" in completed.stdout
+    assert skill_file.read_text(encoding="utf-8") == "# Customer skill\n"
+    assert not (user_home / ".codex" / "AGENTS.md").exists()
+    assert not (user_home / ".agents").exists()
 
 
 def test_instructions_command_prints_the_managed_block(tmp_path: Path) -> None:

@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -270,9 +271,28 @@ def test_plan_initial_install_from_local_trusted_release_without_writing(
         EffectKind.CREATE_VERSION,
         EffectKind.INSTALL_BROWSER,
         EffectKind.INSTALL_AGENT_INSTRUCTIONS,
+        EffectKind.INSTALL_AGENT_SKILL,
         EffectKind.INSTALL_LAUNCHER,
         EffectKind.ACTIVATE_VERSION,
     }
+    user_home = Path.home()
+    codex_home = Path(os.environ.get("CODEX_HOME", user_home / ".codex")).expanduser()
+    instruction_targets = {codex_home / "AGENTS.md", user_home / ".agents" / "AGENTS.md"}
+    skill_targets = {
+        root / "skills" / "migrate-code-automation" / relative
+        for root in (codex_home, user_home / ".agents")
+        for relative in ("SKILL.md", "agents/openai.yaml")
+    }
+    assert {
+        Path(effect.target)
+        for effect in install_plan.effects
+        if effect.kind is EffectKind.INSTALL_AGENT_INSTRUCTIONS
+    } == instruction_targets
+    assert {
+        Path(effect.target)
+        for effect in install_plan.effects
+        if effect.kind is EffectKind.INSTALL_AGENT_SKILL
+    } == skill_targets
     assert install_plan.staging_rule == "stage_before_activation"
     assert install_plan.activation_rule == "activate_after_staged_doctor"
     assert install_plan.recovery_steps
@@ -760,6 +780,55 @@ def test_post_activation_doctor_failure_restores_previous_pointer_and_state(
     saved_record = json.loads(record.read_text(encoding="utf-8"))
     assert saved_record["status"] == "failed"
     assert saved_record["failure"]["code"] == "doctor.failed"
+
+
+def test_agent_files_are_not_changed_when_the_transaction_record_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_root = tmp_path / "install"
+    install_request, _ = _make_release_request(
+        tmp_path,
+        install_root,
+        tmp_path / "data",
+        version="0.1.0",
+        operation=InstallOperation.INSTALL,
+        request_id="record_failure",
+    )
+
+    def create_environment(environment: Path) -> None:
+        (environment / "Scripts").mkdir(parents=True)
+
+    record_failed = False
+    agent_install_called = False
+
+    def fail_complete_record(path: Path, value: object) -> None:
+        nonlocal record_failed
+        if not record_failed and path.parent.name == "transactions":
+            record_failed = True
+            message = "record failed"
+            raise OSError(message)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(value), encoding="utf-8")
+
+    def install_agent_files(*_args: object) -> None:
+        nonlocal agent_install_called
+        agent_install_called = True
+
+    monkeypatch.setattr(installer_core, "_is_windows", lambda: True)
+    monkeypatch.setattr(installer_core, "_create_environment", create_environment)
+    monkeypatch.setattr(installer_core, "_install_wheelhouse", lambda *_args: None)
+    monkeypatch.setattr(installer_core, "_install_browser", lambda *_args: None)
+    monkeypatch.setattr(installer_core, "_run_staged_doctor", lambda *_args: None)
+    monkeypatch.setattr(installer_core, "_write_json_atomic", fail_complete_record)
+    monkeypatch.setattr(installer_core, "_install_agent_instructions", install_agent_files)
+
+    with pytest.raises(InstallerError):
+        apply(plan(install_request))
+
+    assert record_failed is True
+    assert agent_install_called is False
+    assert not (install_root / "versions" / "0.1.0").exists()
 
 
 def test_windows_install_uses_an_atomic_pointer_file_without_symlinks(
