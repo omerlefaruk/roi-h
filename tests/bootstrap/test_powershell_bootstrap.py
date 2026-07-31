@@ -24,6 +24,13 @@ def test_powershell_bootstrap_matches_the_pinned_install_contract() -> None:
     assert "$env:ROI_H_RELEASE_BUNDLE_URL" in script
     assert "$env:ROI_H_RELEASE_BUNDLE_SHA256" in script
     assert '"This release supports Windows x86-64 only."' in script
+    assert "WindowsPrincipal" in script
+    assert "WindowsBuiltInRole]::Administrator" in script
+    assert '"Do not run the user installer as Administrator.' in script
+    assert 'Join-Path $env:USERPROFILE ".roi-h"' in script
+    assert "function Assert-UserWritablePath" in script
+    assert "Assert-UserWritablePath -Path $installRoot" in script
+    assert "Assert-UserWritablePath -Path $dataHome" in script
     assert "[Runtime.InteropServices.RuntimeInformation]::OSArchitecture" not in script
     assert '"PROCESSOR_ARCHITECTURE"' in script
     assert '"PROCESSOR_ARCHITEW6432"' in script

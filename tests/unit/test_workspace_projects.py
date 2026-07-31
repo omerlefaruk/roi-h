@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from roi_h.harness import workspace as workspace_module
 from roi_h.harness.lease import run_lease
 from roi_h.harness.workspace import (
     Workspace,
@@ -101,6 +102,36 @@ def test_init_home_creates_default(tmp_path: Path) -> None:
 
     again = init_home(home)
     assert again["created"] is False
+
+
+def test_workspace_open_does_not_require_home_write_access(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home"
+    create_project(home, "demo")
+    monkeypatch.setattr(workspace_module.os, "access", lambda *_args: False)
+
+    assert Workspace.open(home).project == "demo"
+
+
+def test_project_home_access_error_is_actionable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(
+        workspace_module.os,
+        "access",
+        lambda path, _mode: Path(path) != home,
+    )
+
+    with pytest.raises(
+        PermissionError,
+        match=r"ROI-H cannot write to data home .*Do not run ROI-H with sudo",
+    ):
+        init_home(home)
 
 
 def test_isolation_of_skills_and_db(tmp_path: Path) -> None:

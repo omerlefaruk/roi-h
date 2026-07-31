@@ -203,6 +203,7 @@ ERROR_CODES = frozenset(
         "archive.path_unsafe",
         "artifact.file_missing",
         "artifact.identity_conflict",
+        "home.access_denied",
         "home.schema_unsupported",
         "operation.failed",
         "operation.not_found",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -183,9 +184,7 @@ def create_project(
         msg = f"env must be one of {sorted(_VALID_ENVS)}, got {env!r}"
         raise ValueError(msg)
 
-    base = resolve_home(root)
-    base.mkdir(parents=True, exist_ok=True, mode=0o700)
-    _ensure_home_roots(base)
+    base = _prepare_home(root)
     project_root = _project_dir(base, name)
     if project_root.exists():
         msg = f"project already exists: {project_root}"
@@ -268,9 +267,7 @@ def init_home(
     display_name: str = "",
 ) -> dict[str, Any]:
     """Ensure the data home has at least one version-4 project."""
-    base = resolve_home(root)
-    base.mkdir(parents=True, exist_ok=True, mode=0o700)
-    _ensure_home_roots(base)
+    base = _prepare_home(root)
     existing = list_projects(base)
     if existing:
         active = get_active_project(base)
@@ -521,9 +518,37 @@ def _resolve_env(explicit: str | None, home_config_path: Path, project: str) -> 
     return "dev"
 
 
+def _prepare_home(root: str | Path | None) -> Path:
+    """Create the data home and report access failures with a repair path."""
+    base = resolve_home(root)
+    try:
+        base.mkdir(parents=True, exist_ok=True, mode=0o700)
+        _ensure_home_roots(base)
+        _assert_home_writable(base)
+    except PermissionError as exc:
+        target = exc.filename or base
+        msg = (
+            f"ROI-H cannot write to data home {base} (blocked at {target}). "
+            "Use a writable --home path or ROI_H_HOME. Do not run ROI-H with sudo."
+        )
+        raise PermissionError(errno.EACCES, msg, str(base)) from exc
+    return base
+
+
 def _ensure_home_roots(base: Path) -> None:
     for relative in ("projects", "skills", "diagnostics", "cache"):
         (base / relative).mkdir(parents=True, exist_ok=True, mode=0o700)
+
+
+def _assert_home_writable(base: Path) -> None:
+    _assert_writable_directory(base)
+    for relative in ("projects", "skills", "diagnostics", "cache"):
+        _assert_writable_directory(base / relative)
+
+
+def _assert_writable_directory(path: Path) -> None:
+    if not os.access(path, os.W_OK | os.X_OK):
+        raise PermissionError(errno.EACCES, f"directory is not writable: {path}", str(path))
 
 
 def _ensure_environment_roots(root: Path, env: str) -> None:

@@ -191,11 +191,19 @@ def _mapped_failure(
     prefix = message.partition(":")[0]
     if "." in prefix and " " not in prefix:
         code = prefix
+    elif isinstance(exc, PermissionError) and "ROI-H cannot write to data home " in message:
+        code = "home.access_denied"
     elif isinstance(exc, FileNotFoundError):
         code = "project.not_found" if "project" in message else "operation.failed"
     else:
         code = "operation.failed"
-    category = "not_found" if code.endswith("not_found") else "domain"
+    category = (
+        "permission"
+        if code == "home.access_denied"
+        else "not_found"
+        if code.endswith("not_found")
+        else "domain"
+    )
     return _failure(operation_id, request_id, code, category, message)
 
 
