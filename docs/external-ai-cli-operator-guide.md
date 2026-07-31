@@ -48,6 +48,17 @@ Use `--input -` only when standard input contains the request JSON:
 printf '%s' "$REQUEST_JSON" | roi-h agent call project.list --input -
 ```
 
+## Approval modes
+
+`tool.invoke` uses `approval_mode: "required"` by default. It returns a pending approval
+when policy or tool metadata requires one. Use `approval_mode: "full"` only when the user
+explicitly authorizes full or unattended tool execution for that scope. An explicit mode
+takes precedence over the legacy `auto_approve` and `force` flags. Full mode does not bypass
+production policy, secret handling, or destructive plan-and-apply operations.
+
+Development browser tools open a headed browser by default. An explicit `headless: true`
+tool argument or `ROI_H_BROWSER_HEADED=0` environment setting overrides that default.
+
 ## Safe retries
 
 Use a stable `idempotency_key` for each write. If a response is lost, send the same

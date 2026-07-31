@@ -254,6 +254,10 @@ class _TaskListInput(CommonArguments):
     timeout_seconds: float = Field(default=0, ge=0)
 
 
+class _ToolInvokeInput(_NameWithDisplayInput):
+    approval_mode: Literal["required", "full"] = "required"
+
+
 class _OkOutput(OperationResult):
     ok: bool = False
 
@@ -489,7 +493,7 @@ _INPUT_MODELS: dict[str, OperationModel] = {
     "task.list": _TaskListInput,
     "task.show": _TaskInput,
     "task.wait": _TaskInput,
-    "tool.invoke": _NameWithDisplayInput,
+    "tool.invoke": _ToolInvokeInput,
 }
 
 _OUTPUT_MODELS: dict[str, OperationModel] = {
