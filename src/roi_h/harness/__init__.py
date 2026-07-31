@@ -1,6 +1,5 @@
 """Stable public interfaces for the ActiveGraph RPA core."""
 
-from roi_h.harness.application import RunSession
 from roi_h.harness.interfaces import AutomationRegistry, WorkspaceCatalog
 from roi_h.harness.logical_paths import LogicalPath, PathResolver
 from roi_h.harness.project_archive import ProjectArchive
@@ -14,7 +13,6 @@ __all__ = [
     "PathResolver",
     "ProjectArchive",
     "RetentionPlanner",
-    "RunSession",
     "RunStorage",
     "StoreLifecycle",
     "WorkspaceCatalog",

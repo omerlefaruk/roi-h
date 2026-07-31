@@ -25,8 +25,9 @@ and must not be tracked in this repository.
 ## Publication boundary
 
 The repository contains generic product code, generic documentation, tests, release tools,
-and the supported public runtime skills: `browser`, `codex_chrome`, `excel`, `files`, and
-`pdf`. It also contains the `migrate-code-automation` agent skill. The managed installation
+and the supported public Markdown guidance skills: `browser`, `excel`, `files`, and `pdf`.
+These skills contain no executable scripts. It also contains the
+`migrate-code-automation` agent skill. The managed installation
 publishes that skill to the Codex and shared agent skill directories. The publication guard
 and packaging tests enforce this boundary. Customer data and project state belong in the
 ROI-H data home.

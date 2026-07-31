@@ -1,1 +1,1 @@
-"""Repository-only validation and release scripts."""
+"""Repository release and qualification helpers."""

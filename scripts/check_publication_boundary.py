@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-PUBLIC_SKILLS = frozenset({"browser", "codex_chrome", "excel", "files", "pdf"})
+PUBLIC_SKILLS = frozenset({"browser", "excel", "files", "pdf"})
 PUBLIC_AGENT_SKILLS = frozenset({"migrate-code-automation"})
 _AGENT_SKILL_PART = 3
 _HISTORICAL_PUBLIC_SKILL_FILES = frozenset(
@@ -25,6 +25,23 @@ _HISTORICAL_PUBLIC_SKILL_FILES = frozenset(
         "skills/http/scripts/post.py",
         "skills/shell/SKILL.md",
         "skills/shell/scripts/run.py",
+        "skills/browser/scripts/_session.py",
+        "skills/browser/scripts/click.py",
+        "skills/browser/scripts/download.py",
+        "skills/browser/scripts/fill.py",
+        "skills/browser/scripts/navigate.py",
+        "skills/browser/scripts/session_stop.py",
+        "skills/browser/scripts/snapshot.py",
+        "skills/codex_chrome/SKILL.md",
+        "skills/codex_chrome/scripts/_bridge.py",
+        "skills/codex_chrome/scripts/_contract.py",
+        "skills/codex_chrome/scripts/start.py",
+        "skills/codex_chrome/scripts/status.py",
+        "skills/codex_chrome/scripts/stop.py",
+        "skills/excel/scripts/read_rows.py",
+        "skills/excel/scripts/write_rows.py",
+        "skills/files/scripts/hash.py",
+        "skills/pdf/scripts/extract_text.py",
     }
 )
 
@@ -109,6 +126,10 @@ def publication_violations(paths: Iterable[str], *, history: bool = False) -> li
                 skill
                 and skill not in PUBLIC_SKILLS
                 and skill != "SKILL.md"
+                and not retired_public_file
+            ) or (
+                skill in PUBLIC_SKILLS
+                and Path(path).suffix.lower() != ".md"
                 and not retired_public_file
             ):
                 violations.append(path)

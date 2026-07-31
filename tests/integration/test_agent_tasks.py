@@ -40,26 +40,39 @@ def test_store_backup_task_can_be_resumed_by_event_id(tmp_path: Path) -> None:
     )
     assert create.returncode == 0, create.stdout
 
-    started = subprocess.run(  # noqa: S603
-        [
-            sys.executable,
-            "-m",
-            "roi_h",
-            "rpa",
-            "start",
-            "--home",
-            home,
-            "--run-id",
-            "task-run",
-            "--goal",
-            "Create a store",
-        ],
+    source = _call(
+        "automation.source.put",
+        {
+            "home": home,
+            "name": "task-store",
+            "manifest": {
+                "name": "task-store",
+                "phases": [
+                    {"id": "build", "module": "build"},
+                    {
+                        "id": "verify",
+                        "module": "verify",
+                        "role": "verify",
+                        "needs": ["build"],
+                    },
+                ],
+            },
+            "files": {
+                "build.py": "def run(context):\n    return {'summary': {'ok': True}}\n",
+                "verify.py": "def run(context):\n    return {'summary': {'ok': True}}\n",
+            },
+        },
         cwd=tmp_path,
-        text=True,
-        capture_output=True,
-        check=False,
+        key="task-source",
     )
-    assert started.returncode == 0, started.stderr
+    assert source.returncode == 0, source.stdout
+    started = _call(
+        "automation.dev.run",
+        {"home": home, "name": "task-store", "run_id": "task-run"},
+        cwd=tmp_path,
+        key="task-run",
+    )
+    assert started.returncode == 0, started.stdout
 
     backup = _call(
         "store.backup",

@@ -6,10 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from roi_h.harness.application import RunSession
 from roi_h.harness.automation import list_automations, load_automation
-from roi_h.harness.domain import BudgetSpec
-from roi_h.harness.journeys import run_automation, ship_automation
+from roi_h.harness.automation_source import put_source
+from roi_h.harness.journeys import run_automation, run_development_source, ship_automation
 from roi_h.harness.workspace import Workspace, create_project, list_projects
 
 
@@ -42,7 +41,7 @@ class WorkspaceCatalog:
 
 @dataclass(frozen=True)
 class AutomationRegistry:
-    """Publish, verify, promote, and execute packages for one environment."""
+    """Create, verify, ship, and execute modular automations."""
 
     workspace: Workspace
 
@@ -51,6 +50,32 @@ class AutomationRegistry:
 
     def load(self, name: str, *, version: str | None = None) -> dict[str, Any]:
         return load_automation(self.workspace, name, version=version)
+
+    def put_source(
+        self,
+        name: str,
+        *,
+        manifest: dict[str, Any],
+        files: dict[str, str],
+    ) -> dict[str, Any]:
+        snapshot = put_source(self.workspace.automation_sources, name, manifest, files)
+        return snapshot.model_dump(mode="json")
+
+    def run_development(
+        self,
+        name: str,
+        *,
+        run_id: str | None = None,
+        goal: str = "",
+        inputs: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        return run_development_source(
+            self.workspace,
+            name=name,
+            run_id=run_id,
+            goal=goal,
+            inputs=inputs,
+        )
 
     def ship(
         self,
@@ -76,17 +101,15 @@ class AutomationRegistry:
         *,
         version: str | None = None,
         run_id: str | None = None,
-        dry_run: bool = False,
-        budget: BudgetSpec | None = None,
+        inputs: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         return run_automation(
             self.workspace,
             name=name,
             version=version,
             run_id=run_id,
-            dry_run=dry_run,
-            budget=budget,
+            inputs=inputs,
         )
 
 
-__all__ = ["AutomationRegistry", "RunSession", "WorkspaceCatalog"]
+__all__ = ["AutomationRegistry", "WorkspaceCatalog"]

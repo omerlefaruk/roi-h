@@ -5,10 +5,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from roi_h.harness.automation import list_automations, load_automation
+from roi_h.harness.automation_source import show_source
 from roi_h.harness.diagnostics import DiagnosticSink
-from roi_h.harness.loader import load_skills, resolve_skills_root
+from roi_h.harness.guidance_skills import load_guidance_skills
+from roi_h.harness.records import evidenced_artifacts
 from roi_h.harness.retention import RetentionPlanner
-from roi_h.harness.run_storage import RunStorage
 from roi_h.harness.secrets import get_secret, list_secrets
 from roi_h.harness.store_lifecycle import StoreLifecycle
 from roi_h.harness.workspace import Workspace
@@ -81,20 +82,12 @@ def run_trace(request: CommandRequest) -> dict[str, Any]:
     grouped: dict[str, list[dict[str, Any]]] = {
         "runs": [],
         "phases": [],
-        "steps": [],
-        "invocations": [],
-        "approvals": [],
         "artifacts": [],
-        "reconciliation": [],
     }
     mapping = {
         "rpa.run": "runs",
         "rpa.phase": "phases",
-        "rpa.step": "steps",
-        "rpa.invocation": "invocations",
-        "rpa.approval": "approvals",
         "rpa.artifact": "artifacts",
-        "rpa.reconciliation": "reconciliation",
     }
     for item in projection["objects"][: _limit(request)]:
         group = mapping.get(str(item.get("type")))
@@ -141,48 +134,12 @@ def store_check(request: CommandRequest) -> dict[str, Any]:
     )
 
 
-def tool_list(request: CommandRequest) -> dict[str, Any]:
-    """List tool contracts without source paths."""
-    workspace = _workspace(request)
-    catalog = load_skills(
-        resolve_skills_root(request.arguments.get("skills")),
-        shared_root=workspace.shared_skills,
-        project_root=workspace.project_skills,
-        database=workspace.db,
-    )
-    items = [
-        cast("dict[str, Any]", _safe(item.model_dump(mode="json"))) for item in catalog.list_tools()
-    ]
-    return _page(items, request, snapshot=f"tools:{len(items)}")
-
-
-def tool_show(request: CommandRequest) -> dict[str, Any]:
-    """Show one tool contract."""
-    name = _name(request)
-    page = tool_list(request)
-    item = next((item for item in page["items"] if item.get("name") == name), None)
-    if item is None:
-        msg = f"tool not found: {name}"
-        raise FileNotFoundError(msg)
-    return cast("dict[str, Any]", item)
-
-
-def approval_list(request: CommandRequest) -> dict[str, Any]:
-    """List approvals from the bounded run projection."""
-    return _objects_page(request, "rpa.approval")
-
-
-def approval_show(request: CommandRequest) -> dict[str, Any]:
-    """Show one approval."""
-    return _object_show(request, "rpa.approval", "approval_id")
-
-
 def artifact_list(request: CommandRequest) -> dict[str, Any]:
     """List durable artifact metadata."""
     run_id = _run_id(request)
     items = [
         cast("dict[str, Any]", _safe(item.to_dict()))
-        for item in RunStorage(_workspace(request)).list(run_id)
+        for item in evidenced_artifacts(_workspace(request), run_id)
     ]
     return {"run_id": run_id, **_page(items, request, snapshot=f"artifacts:{len(items)}")}
 
@@ -190,9 +147,13 @@ def artifact_list(request: CommandRequest) -> dict[str, Any]:
 def artifact_show(request: CommandRequest) -> dict[str, Any]:
     """Show one artifact by identity."""
     artifact_id = str(request.arguments.get("artifact_id") or "")
-    page = artifact_list(request)
+    run_id = _run_id(request)
     item = next(
-        (item for item in page["items"] if item.get("artifact_id") == artifact_id),
+        (
+            _safe(item.to_dict())
+            for item in evidenced_artifacts(_workspace(request), run_id)
+            if item.artifact_id == artifact_id
+        ),
         None,
     )
     if item is None:
@@ -202,33 +163,56 @@ def artifact_show(request: CommandRequest) -> dict[str, Any]:
 
 
 def skill_list(request: CommandRequest) -> dict[str, Any]:
-    """List skill names and tool counts."""
-    tools = tool_list(request)["items"]
-    grouped: dict[tuple[str, str], int] = {}
-    for item in tools:
-        key = (str(item.get("skill")), str(item.get("scope")))
-        grouped[key] = grouped.get(key, 0) + 1
-    items = [
-        {"name": name, "scope": scope, "tool_count": count}
-        for (name, scope), count in sorted(grouped.items())
-    ]
+    """List Markdown-only guidance skills."""
+    workspace = _workspace(request)
+    skills = load_guidance_skills(
+        shared_root=workspace.shared_skills,
+        project_root=workspace.project_skills,
+    )
+    items = [skills[name].to_dict() for name in sorted(skills)]
     return _page(items, request, snapshot=f"skills:{len(items)}")
 
 
 def skill_show(request: CommandRequest) -> dict[str, Any]:
-    """Show one skill and its tools."""
+    """Show one guidance skill and its Markdown references."""
     name = _name(request)
-    tools = [item for item in tool_list(request)["items"] if item.get("skill") == name]
-    if not tools:
+    workspace = _workspace(request)
+    skills = load_guidance_skills(
+        shared_root=workspace.shared_skills,
+        project_root=workspace.project_skills,
+    )
+    skill = skills.get(name)
+    if skill is None:
         msg = f"skill not found: {name}"
         raise FileNotFoundError(msg)
-    return {
-        "name": name,
-        "scope": tools[0].get("scope"),
-        "valid": True,
-        "tools": tools,
-        "tool_count": len(tools),
-    }
+    return skill.to_dict(include_documents=True)
+
+
+def automation_source_list(request: CommandRequest) -> dict[str, Any]:
+    """List editable automation sources in the selected project."""
+    workspace = _workspace(request)
+    items: list[dict[str, Any]] = []
+    if workspace.automation_sources.is_dir():
+        roots = (
+            path
+            for path in workspace.automation_sources.iterdir()
+            if path.is_dir() and (path / "automation.json").is_file()
+        )
+        for root in sorted(roots):
+            data = show_source(root)
+            items.append(
+                {
+                    "name": data["name"],
+                    "source_digest": data["source_digest"],
+                    "phases": data["manifest"]["phases"],
+                }
+            )
+    return _page(items, request, snapshot=f"automation-sources:{len(items)}")
+
+
+def automation_source_show(request: CommandRequest) -> dict[str, Any]:
+    """Show one editable automation source and its portable text files."""
+    return show_source(_workspace(request).automation_sources / _name(request))
 
 
 def automation_list(request: CommandRequest) -> dict[str, Any]:
@@ -244,7 +228,8 @@ def automation_show(request: CommandRequest) -> dict[str, Any]:
         _name(request),
         version=request.arguments.get("version"),
     )
-    data.pop("recipe_obj", None)
+    data.pop("source_root", None)
+    data.pop("source", None)
     return cast("dict[str, Any]", _safe(data))
 
 
@@ -441,13 +426,13 @@ def _safe(value: Any) -> Any:  # noqa: ANN401 - Recursive JSON values are dynami
 
 
 __all__ = [
-    "approval_list",
-    "approval_show",
     "artifact_list",
     "artifact_show",
     "automation_compare",
     "automation_list",
     "automation_show",
+    "automation_source_list",
+    "automation_source_show",
     "diagnostic_list",
     "list_runs",
     "project_show",
@@ -461,6 +446,4 @@ __all__ = [
     "skill_show",
     "store_check",
     "store_status",
-    "tool_list",
-    "tool_show",
 ]

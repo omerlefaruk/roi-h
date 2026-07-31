@@ -8,7 +8,7 @@ from pathlib import Path
 
 from roi_h.harness.atomicfs import atomic_write_text
 
-INSTRUCTIONS_VERSION = 3
+INSTRUCTIONS_VERSION = 4
 AGENT_SKILLS = ("migrate-code-automation",)
 AGENT_SKILL_MARKER = "<!-- ROI-H managed agent skill -->"
 _AGENT_SKILL_FILES = ("SKILL.md", "agents/openai.yaml")
@@ -24,22 +24,24 @@ When a task uses ROI-H:
 - Run `roi-h agent context` first.
 - Run `roi-h agent describe` and `roi-h agent describe <operation>` before calls.
 - Call operations with `roi-h agent call <operation> --input <file|->`.
-- Treat the live operation manifest as the authority for schemas, effects, approvals,
+- Treat the live operation manifest as the authority for schemas, effects,
   idempotency, plans, secrets, pagination, tasks, and time limits.
 - Use a stable idempotency key for each write. Retry a lost write with the same operation,
   context, arguments, and key.
-- Use `approval_mode: "full"` on `tool.invoke` only when the user explicitly gives
-  full or unattended authority for that scope. Otherwise, show each pending effect and
-  ask for approval.
-- Full tool approval does not bypass production policy, secret handling, or destructive
-  plans. Use the related `.plan` operation before a destructive `.apply` operation.
+- Use the related `.plan` operation before a destructive `.apply` operation.
 - Never put secret values in prompts, JSON, arguments, logs, plans, or files. Use the
   secure standard-input channel.
 - For product tasks, do not bypass ROI-H with direct browser, shell, network, file, or
   database operations. For code migration only, you can inspect user-supplied source files
   read-only. Do not execute or change the legacy automation.
-- Build repeatable work in `dev`, verify the run evidence, ship an immutable automation,
-  dry-run it, and use `prod` only when the user requests a production run.
+- Read `skill.list` and `skill.show` for Markdown guidance. Skills do not execute code.
+- Create repeatable work with `automation.source.put`. Use small Python phase modules,
+  dependency edges, artifacts, and a final verification phase. Do not create one large
+  script.
+- Run editable source with `automation.dev.run`. ROI-H freezes the source before it runs
+  and records phase, input, artifact, and completion evidence in ActiveGraph.
+- Ship only from a successful development run with `automation.ship`. Run the immutable
+  package with `automation.run` in `prod` only when the user requests a production run.
 - Report the project, environment, run or task ID, automation version, artifacts,
   approvals, warnings, and required user action.
 {END_MARKER}"""

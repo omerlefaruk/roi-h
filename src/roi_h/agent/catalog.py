@@ -16,13 +16,13 @@ from roi_h.agent.contract import (
 )
 from roi_h.agent.operation_models import OperationModel, input_model, output_model
 from roi_h.agent.read_operations import (
-    approval_list,
-    approval_show,
     artifact_list,
     artifact_show,
     automation_compare,
     automation_list,
     automation_show,
+    automation_source_list,
+    automation_source_show,
     diagnostic_list,
     list_runs,
     project_show,
@@ -36,23 +36,16 @@ from roi_h.agent.read_operations import (
     skill_show,
     store_check,
     store_status,
-    tool_list,
-    tool_show,
 )
 from roi_h.agent.tasks import task_cancel, task_events, task_list, task_show, task_wait
 from roi_h.agent.workflow_operations import (
     artifact_export,
-    artifact_put,
+    automation_dev_run,
     automation_run,
     automation_ship,
+    automation_source_put,
     environment_doctor,
     environment_set,
-    phase_begin,
-    phase_end,
-    phase_fail,
-    phase_list,
-    phase_retry,
-    phase_skip,
     project_doctor,
     project_export,
     project_import,
@@ -64,27 +57,18 @@ from roi_h.agent.workflow_operations import (
     run_cancel,
     run_files,
     run_input_add,
-    run_reconcile,
     secret_delete_operation,
     secret_set_operation,
-    skill_define,
-    skill_delete_apply,
-    skill_delete_plan,
-    skill_promote,
     store_restore_apply,
     store_restore_plan,
     support_bundle_create,
     system_doctor,
 )
 from roi_h.agent.write_operations import (
-    approval_approve,
-    approval_reject,
     project_create,
     project_delete_apply,
     project_delete_plan,
-    run_start,
     store_backup,
-    tool_invoke,
 )
 from roi_h.harness.workspace import Workspace, list_projects
 from roi_h.observer.activegraph_adapter import ActiveGraphProjectionAdapter
@@ -175,15 +159,23 @@ def build_catalog() -> OperationCatalog:
         ("environment.doctor", "Inspect the selected environment.", environment_doctor, False),
         ("store.status", "Show store status.", store_status, False),
         ("store.check", "Check the selected store.", store_check, False),
-        ("tool.list", "List tools and schemas.", tool_list, True),
-        ("tool.show", "Show one tool and its schemas.", tool_show, False),
-        ("approval.list", "List run approvals.", approval_list, True),
-        ("approval.show", "Show one run approval.", approval_show, False),
         ("artifact.list", "List durable artifacts.", artifact_list, True),
         ("artifact.show", "Show one durable artifact.", artifact_show, False),
         ("skill.list", "List available skills.", skill_list, True),
         ("skill.show", "Show one available skill.", skill_show, False),
         ("skill.validate", "Validate one available skill.", skill_show, False),
+        (
+            "automation.source.list",
+            "List editable modular automation sources.",
+            automation_source_list,
+            True,
+        ),
+        (
+            "automation.source.show",
+            "Show one editable modular automation source.",
+            automation_source_show,
+            False,
+        ),
         ("automation.list", "List immutable automations.", automation_list, True),
         ("automation.show", "Show one immutable automation.", automation_show, False),
         ("automation.verify", "Verify one immutable automation.", automation_show, False),
@@ -215,38 +207,6 @@ def build_catalog() -> OperationCatalog:
             "store.backup",
             "Create a consistent store backup as a durable task.",
             store_backup,
-            Effect.WRITE,
-            Idempotency.REQUIRED,
-            "none",
-        ),
-        (
-            "run.start",
-            "Start one durable run.",
-            run_start,
-            Effect.WRITE,
-            Idempotency.REQUIRED,
-            "none",
-        ),
-        (
-            "tool.invoke",
-            "Invoke one tool through ActiveGraph authority.",
-            tool_invoke,
-            Effect.WRITE,
-            Idempotency.REQUIRED,
-            "none",
-        ),
-        (
-            "approval.approve",
-            "Approve and execute one deferred invocation.",
-            approval_approve,
-            Effect.WRITE,
-            Idempotency.REQUIRED,
-            "none",
-        ),
-        (
-            "approval.reject",
-            "Reject one deferred invocation without execution.",
-            approval_reject,
             Effect.WRITE,
             Idempotency.REQUIRED,
             "none",
@@ -386,14 +346,6 @@ def build_catalog() -> OperationCatalog:
             "none",
         ),
         (
-            "run.reconcile",
-            "Reconcile durable run records.",
-            run_reconcile,
-            Effect.WRITE,
-            Idempotency.REQUIRED,
-            "none",
-        ),
-        (
             "run.input.add",
             "Add one materialized run input.",
             run_input_add,
@@ -410,62 +362,6 @@ def build_catalog() -> OperationCatalog:
             "none",
         ),
         (
-            "phase.list",
-            "List run phases.",
-            phase_list,
-            Effect.READ,
-            Idempotency.NOT_APPLICABLE,
-            "none",
-        ),
-        (
-            "phase.begin",
-            "Begin one run phase.",
-            phase_begin,
-            Effect.WRITE,
-            Idempotency.REQUIRED,
-            "none",
-        ),
-        (
-            "phase.end",
-            "End the open run phase.",
-            phase_end,
-            Effect.WRITE,
-            Idempotency.REQUIRED,
-            "none",
-        ),
-        (
-            "phase.fail",
-            "Fail the open run phase.",
-            phase_fail,
-            Effect.WRITE,
-            Idempotency.REQUIRED,
-            "none",
-        ),
-        (
-            "phase.skip",
-            "Skip one run phase.",
-            phase_skip,
-            Effect.WRITE,
-            Idempotency.REQUIRED,
-            "none",
-        ),
-        (
-            "phase.retry",
-            "Retry one run phase.",
-            phase_retry,
-            Effect.WRITE,
-            Idempotency.REQUIRED,
-            "none",
-        ),
-        (
-            "artifact.put",
-            "Attach one file artifact.",
-            artifact_put,
-            Effect.WRITE,
-            Idempotency.REQUIRED,
-            "none",
-        ),
-        (
             "artifact.export",
             "Export one artifact.",
             artifact_export,
@@ -474,36 +370,20 @@ def build_catalog() -> OperationCatalog:
             "none",
         ),
         (
-            "skill.define",
-            "Define one project-owned skill tool.",
-            skill_define,
+            "automation.source.put",
+            "Create or replace one editable modular automation source.",
+            automation_source_put,
             Effect.WRITE,
             Idempotency.REQUIRED,
             "none",
         ),
         (
-            "skill.promote",
-            "Promote one project skill to user-shared storage.",
-            skill_promote,
+            "automation.dev.run",
+            "Run one frozen modular source in development.",
+            automation_dev_run,
             Effect.WRITE,
             Idempotency.REQUIRED,
             "none",
-        ),
-        (
-            "skill.delete.plan",
-            "Plan deletion of one user-shared skill.",
-            skill_delete_plan,
-            Effect.WRITE,
-            Idempotency.NOT_APPLICABLE,
-            "creates_plan",
-        ),
-        (
-            "skill.delete.apply",
-            "Apply a reviewed skill deletion plan.",
-            skill_delete_apply,
-            Effect.DESTRUCTIVE,
-            Idempotency.REQUIRED,
-            "required",
         ),
         (
             "automation.ship",
@@ -641,7 +521,13 @@ def _operation(  # noqa: PLR0913 - Descriptor fields stay explicit at registrati
             execution_mode=ExecutionMode.TASK
             if operation_id == "store.backup"
             else ExecutionMode.SYNC,
-            timeout_seconds=3600 if operation_id == "store.backup" else 30,
+            timeout_seconds=(
+                3600
+                if operation_id == "store.backup"
+                else 172800
+                if operation_id in {"automation.dev.run", "automation.run"}
+                else 30
+            ),
         ),
         handler=handler,
         input_model=operation_input,
@@ -676,25 +562,17 @@ def _system_context(request: CommandRequest) -> dict[str, Any]:
         db=arguments.get("db"),
     )
     recent_runs: list[dict[str, Any]] = []
-    pending_approvals: list[dict[str, Any]] = []
     warnings: list[str] = []
     if workspace.db.is_file():
         adapter = ActiveGraphProjectionAdapter(workspace.db)
-        for header in adapter.list_run_headers(limit=10):
-            recent_runs.append(
-                {
-                    "run_id": str(header["run_id"]),
-                    "created_at": str(header.get("created_at") or ""),
-                    "goal": str(header.get("goal") or header.get("label") or ""),
-                }
-            )
-            projection = adapter.project_run(str(header["run_id"]))
-            pending_approvals.extend(
-                item
-                for item in projection["objects"]
-                if item.get("type") == "rpa.approval"
-                and item.get("data", {}).get("status") == "pending"
-            )
+        recent_runs.extend(
+            {
+                "run_id": str(header["run_id"]),
+                "created_at": str(header.get("created_at") or ""),
+                "goal": str(header.get("goal") or header.get("label") or ""),
+            }
+            for header in adapter.list_run_headers(limit=10)
+        )
     else:
         warnings.append("The selected environment has no run store yet.")
     return {
@@ -703,9 +581,10 @@ def _system_context(request: CommandRequest) -> dict[str, Any]:
         "environment": workspace.env,
         "health_warnings": warnings,
         "recent_runs": recent_runs,
-        "pending_approvals": pending_approvals,
+        "pending_approvals": [],
         "safe_next_actions": [
-            {"operation": "tool.list"},
+            {"operation": "skill.list"},
+            {"operation": "automation.source.list"},
             {"operation": "run.list"},
         ],
     }

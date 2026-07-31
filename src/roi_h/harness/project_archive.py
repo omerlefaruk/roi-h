@@ -350,7 +350,8 @@ def _definition_entries(
             entries.append((f"project/{relative}", path, kind))
     for root_name, kind in (
         ("reference", "reference"),
-        ("skills", "project-skill"),
+        ("skills", "project-guidance"),
+        ("sources", "automation-source"),
         ("packages", "automation-package"),
         ("channels", "channel"),
     ):
@@ -567,7 +568,7 @@ def _validate_staged_project(staging: Path, manifest: dict[str, Any]) -> None:
 
 def _contains_project_skills(manifest: dict[str, Any]) -> bool:
     return any(
-        str(item.get("kind")) == "project-skill"
+        str(item.get("kind")) == "project-guidance"
         for item in manifest.get("files") or []
         if isinstance(item, dict)
     )

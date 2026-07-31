@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
 from pydantic.json_schema import GenerateJsonSchema, JsonSchemaMode
 
 from roi_h.agent.contract import JSON_SCHEMA_DIALECT
+from roi_h.harness.automation_source import AutomationSourceManifest  # noqa: TC001
 
 type OperationModel = type[BaseModel]
 
@@ -57,45 +58,27 @@ class CommonArguments(InputArguments):
     name: str | None = None
     limit: int = Field(default=50, ge=1, le=200)
     cursor: str | None = None
-    skills: str | None = None
     version: str | None = None
     version_a: str | None = None
     version_b: str | None = None
-    approval_id: str | None = None
     artifact_id: str | None = None
     plan_id: str | None = None
     full: bool = False
-    arguments: dict[str, Any] = Field(default_factory=dict)
     source: str | None = None
     source_path: str | None = None
     output: str | None = None
     mode: str | None = None
     new_name: str | None = None
     reason: str | None = None
-    by: str | None = None
-    repair: bool = False
-    description: str | None = None
-    summary: dict[str, Any] | None = None
-    error: str | None = None
-    require_artifacts: list[str] | None = None
-    skill: str | None = None
-    tool: str | None = None
-    overwrite: bool = False
     from_run: str | None = None
-    from_handoff: str | None = None
     goal: str | None = None
     notes: str | None = None
-    skills_list: list[str] | None = None
-    distill: bool = False
-    dry_run: bool = False
-    auto_approve: bool | None = None
-    force: bool = False
     actor: str | None = None
-    set_args: list[str] | None = None
     secret_value: str | None = None
     policy: dict[str, Any] | None = None
     target: str | None = None
     use: bool = False
+    inputs: dict[str, str] | None = None
 
 
 class OperationResult(_ContractSchemaModel):
@@ -103,6 +86,16 @@ class OperationResult(_ContractSchemaModel):
 
     model_config = ConfigDict(
         extra="allow",
+        strict=True,
+        json_schema_extra={"$schema": JSON_SCHEMA_DIALECT},
+    )
+
+
+class _StrictOutput(OperationResult):
+    """Closed output contract for architecture-critical automation operations."""
+
+    model_config = ConfigDict(
+        extra="forbid",
         strict=True,
         json_schema_extra={"$schema": JSON_SCHEMA_DIALECT},
     )
@@ -138,14 +131,6 @@ class _ProjectListInput(InputArguments):
     cursor: str | None = None
 
 
-class _ApprovalIdInput(CommonArguments):
-    approval_id: str | None
-
-
-class _ApprovalIdWithDisplayInput(_ApprovalIdInput):
-    display_name: str | None = None
-
-
 class _ArtifactExportInput(CommonArguments):
     artifact_id: str | None
     output: str | None
@@ -167,12 +152,21 @@ class _AutomationShipInput(CommonArguments):
     from_run: str | None
 
 
+class _AutomationSourcePutInput(CommonArguments):
+    name: str | None
+    manifest: AutomationSourceManifest
+    files: dict[str, str]
+
+
+class _AutomationDevRunInput(CommonArguments):
+    name: str | None
+    run_id: str | None = None
+    goal: str | None = None
+    actor: str | None = None
+
+
 class _EnvironmentSetInput(CommonArguments):
     environment: Literal["dev", "prod"] | None
-
-
-class _ErrorInput(CommonArguments):
-    error: str | None
 
 
 class _NameInput(CommonArguments):
@@ -254,20 +248,10 @@ class _RunInputAddInput(CommonArguments):
         return self
 
 
-class _SkillDefineInput(CommonArguments):
-    skill: str | None
-    tool: str | None
-
-
 class _TaskInput(CommonArguments):
     task_id: str | None
     after: str | None = None
     timeout_seconds: float = Field(default=0, ge=0)
-
-
-class _GoalInput(CommonArguments):
-    goal: str | None
-    display_name: str | None = None
 
 
 class _NameWithDisplayInput(_NameInput):
@@ -291,21 +275,6 @@ class _TaskListInput(CommonArguments):
     task_id: str | None = None
     after: str | None = None
     timeout_seconds: float = Field(default=0, ge=0)
-
-
-class _ToolInvokeInput(_NameWithDisplayInput):
-    approval_mode: Literal["required", "full"] = "required"
-    filesystem_grants: list[
-        Literal[
-            "project:reference:read",
-            "run:input:read",
-            "run:work:read-write",
-            "run:output:read-write",
-            "run:tmp:read-write",
-            "artifact:read",
-            "automation:read",
-        ]
-    ] = Field(default_factory=list)
 
 
 class _OkOutput(OperationResult):
@@ -390,14 +359,6 @@ class _EnvironmentSetOutput(OperationResult):
     environment: str
 
 
-class _RunStartOutput(OperationResult):
-    run_id: str
-    object_id: str
-    status: str
-    project: str
-    environment: str
-
-
 class _RunInputAddOutput(OperationResult):
     run_id: str
     path: str
@@ -412,33 +373,12 @@ class _RunFilesOutput(OperationResult):
     artifacts: list[Any]
 
 
-class _RunReconcileOutput(OperationResult):
-    run_id: str
-    ok: bool
-    issues: list[Any]
-
-
-class _ArtifactPutOutput(OperationResult):
-    artifact_id: str
-    run_id: str
-    name: str
-    uri: str
-    sha256: str
-    bytes: int
-
-
 class _ArtifactExportOutput(OperationResult):
     artifact_id: str
     uri: str
     run_id: str
     bytes: int
     sha256: str
-
-
-class _PhaseOutput(OperationResult):
-    phase_id: str = ""
-    name: str = ""
-    status: str = ""
 
 
 class _StoreBackupOutput(OperationResult):
@@ -464,12 +404,6 @@ class _StoreRestoreApplyOutput(OperationResult):
     changed: bool
     restored_from: str
     store: dict[str, Any]
-
-
-class _ToolInvokeOutput(OperationResult):
-    run_id: str
-    status: str
-    invocation_id: str
 
 
 class _SecretSetOutput(_OkOutput):
@@ -498,22 +432,101 @@ class _TaskOutput(OperationResult):
     operation: str
 
 
+class _AutomationSourcePutOutput(_StrictOutput):
+    ok: bool
+    name: str
+    source_digest: str
+    files: list[str]
+    phase_plan: list[dict[str, Any]]
+
+
+class _AutomationSourceListItem(_StrictOutput):
+    name: str
+    source_digest: str
+    phases: list[dict[str, Any]]
+
+
+class _AutomationSourceListOutput(_StrictOutput):
+    items: list[_AutomationSourceListItem]
+    next_cursor: str | None
+    has_more: bool
+    snapshot: str
+
+
+class _AutomationSourceShowOutput(_StrictOutput):
+    name: str
+    source_digest: str
+    manifest: AutomationSourceManifest
+    files: dict[str, str]
+
+
+class _AutomationListItem(_StrictOutput):
+    name: str
+    selected: str | None
+    versions: list[str]
+
+
+class _AutomationListOutput(_StrictOutput):
+    items: list[_AutomationListItem]
+    next_cursor: str | None
+    has_more: bool
+    snapshot: str
+
+
+class _AutomationRunOutput(_StrictOutput):
+    ok: bool
+    run_id: str
+    environment: Literal["dev", "prod"]
+    automation: str | dict[str, Any]
+    source_digest: str
+    status: Literal["completed", "failed"]
+    verification_ok: bool
+    phase_states: dict[str, str]
+    phases: dict[str, Any]
+
+
+class _AutomationShipOutput(_StrictOutput):
+    ok: bool
+    shipped: bool
+    name: str
+    version: str
+    source_run_id: str
+    source_digest: str
+    package_digest: str
+    publish: dict[str, Any]
+    promotion: dict[str, Any]
+
+
+class _AutomationVerifyOutput(_StrictOutput):
+    ok: bool
+    name: str
+    version: str
+    manifest: dict[str, Any]
+    package_digest: str
+    source_digest: str
+    source_files: list[str]
+
+
+class _AutomationCompareOutput(_StrictOutput):
+    name: str
+    version_a: str
+    version_b: str
+    same_digest: bool
+    digest_a: str
+    digest_b: str
+
+
 _INPUT_MODELS: dict[str, OperationModel] = {
-    "approval.approve": _ApprovalIdWithDisplayInput,
-    "approval.reject": _ApprovalIdWithDisplayInput,
-    "approval.show": _ApprovalIdInput,
     "artifact.export": _ArtifactExportInput,
-    "artifact.put": _ArtifactPutInput,
     "automation.compare": _AutomationCompareInput,
+    "automation.dev.run": _AutomationDevRunInput,
     "automation.run": _NameInput,
     "automation.ship": _AutomationShipInput,
+    "automation.source.put": _AutomationSourcePutInput,
+    "automation.source.show": _NameInput,
     "automation.show": _NameInput,
     "automation.verify": _NameInput,
     "environment.set": _EnvironmentSetInput,
-    "phase.begin": _NameInput,
-    "phase.fail": _ErrorInput,
-    "phase.retry": _NameInput,
-    "phase.skip": _NameInput,
     "project.create": _ProjectCreateInput,
     "project.delete.apply": _PlanIdWithDisplayInput,
     "project.delete.plan": _NameWithDisplayInput,
@@ -525,15 +538,9 @@ _INPUT_MODELS: dict[str, OperationModel] = {
     "retention.apply": _PlanIdInput,
     "retention.show": _PlanIdInput,
     "run.input.add": _RunInputAddInput,
-    "run.reconcile": CommonArguments,
-    "run.start": _GoalInput,
     "secret.delete": _NameInput,
     "secret.set": _NameInput,
     "secret.status": _NameInput,
-    "skill.define": _SkillDefineInput,
-    "skill.delete.apply": _PlanIdInput,
-    "skill.delete.plan": _NameInput,
-    "skill.promote": _NameInput,
     "skill.show": _NameInput,
     "skill.validate": _NameInput,
     "store.backup": _OutputWithDisplayInput,
@@ -545,7 +552,6 @@ _INPUT_MODELS: dict[str, OperationModel] = {
     "task.list": _TaskListInput,
     "task.show": _TaskInput,
     "task.wait": _TaskInput,
-    "tool.invoke": _ToolInvokeInput,
 }
 
 _OUTPUT_MODELS: dict[str, OperationModel] = {
@@ -562,22 +568,23 @@ _OUTPUT_MODELS: dict[str, OperationModel] = {
     "project.paths": _ProjectShowOutput,
     "environment.doctor": _DoctorOutput,
     "environment.set": _EnvironmentSetOutput,
-    "run.start": _RunStartOutput,
+    "automation.source.put": _AutomationSourcePutOutput,
+    "automation.source.list": _AutomationSourceListOutput,
+    "automation.source.show": _AutomationSourceShowOutput,
+    "automation.list": _AutomationListOutput,
+    "automation.show": _AutomationVerifyOutput,
+    "automation.dev.run": _AutomationRunOutput,
+    "automation.run": _AutomationRunOutput,
+    "automation.ship": _AutomationShipOutput,
+    "automation.verify": _AutomationVerifyOutput,
+    "automation.compare": _AutomationCompareOutput,
     "run.input.add": _RunInputAddOutput,
     "run.files": _RunFilesOutput,
-    "run.reconcile": _RunReconcileOutput,
-    "artifact.put": _ArtifactPutOutput,
     "artifact.export": _ArtifactExportOutput,
-    "phase.begin": _PhaseOutput,
-    "phase.end": _PhaseOutput,
-    "phase.fail": _PhaseOutput,
-    "phase.retry": _PhaseOutput,
-    "phase.skip": _PhaseOutput,
     "store.backup": _StoreBackupOutput,
     "store.check": _StoreCheckOutput,
     "store.status": _StoreStatusOutput,
     "store.restore.apply": _StoreRestoreApplyOutput,
-    "tool.invoke": _ToolInvokeOutput,
     "secret.list": _OkOutput,
     "secret.set": _SecretSetOutput,
     "secret.delete": _SecretDeleteOutput,

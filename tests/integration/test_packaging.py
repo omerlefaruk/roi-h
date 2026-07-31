@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-_PUBLIC_SKILLS = {"browser", "codex_chrome", "excel", "files", "pdf"}
+_PUBLIC_SKILLS = {"browser", "excel", "files", "pdf"}
 _PUBLIC_AGENT_SKILLS = {"migrate-code-automation"}
 
 
@@ -28,15 +28,18 @@ def test_wheel_contains_only_roi_h_and_distribution_metadata(tmp_path: Path) -> 
         names = archive.namelist()
 
     assert "roi_h/py.typed" in names
-    assert "roi_h/harness/application.py" in names
+    assert "roi_h/harness/automation_runner.py" in names
+    assert "roi_h/harness/guidance_skills.py" in names
     assert "roi_h/_agent_skills/migrate-code-automation/SKILL.md" in names
     assert "roi_h/_agent_skills/migrate-code-automation/agents/openai.yaml" in names
     assert "roi_h/application.py" not in names
     assert "roi_h/domain.py" not in names
     assert not any(name.startswith("roi_h/packs/") for name in names)
     assert "roi_h/_skills/SKILL.md" not in names
-    assert "roi_h/_skills/browser/scripts/navigate.py" in names
-    assert "roi_h/_skills/files/scripts/hash.py" in names
+    assert "roi_h/_skills/browser/SKILL.md" in names
+    assert "roi_h/_skills/files/SKILL.md" in names
+    assert not any("/scripts/" in name for name in names if name.startswith("roi_h/_skills/"))
+    assert all(name.endswith((".md", "/")) for name in names if name.startswith("roi_h/_skills/"))
     assert not any(
         name.startswith(
             (
@@ -79,11 +82,11 @@ def test_wheel_contains_only_roi_h_and_distribution_metadata(tmp_path: Path) -> 
             (
                 "from pathlib import Path; "
                 "from roi_h.agent_instructions import install_agent_instructions; "
-                "from roi_h.harness.loader import default_skills_root, load_skills; "
-                "root=default_skills_root(); "
-                "catalog=load_skills(); "
+                "from roi_h.harness.guidance_skills import default_guidance_root, load_guidance_skills; "
+                "root=default_guidance_root(); "
+                "catalog=load_guidance_skills(); "
                 "assert root.name == '_skills'; "
-                "assert catalog.resolve('browser', 'navigate'); "
+                "assert catalog['browser'].documents == {'SKILL.md': (root / 'browser/SKILL.md').read_text(encoding='utf-8')}; "
                 "home=Path.cwd() / 'agent-home'; "
                 "install_agent_instructions(home); "
                 "assert (home / '.codex/skills/migrate-code-automation/SKILL.md').is_file(); "

@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import json
-from argparse import Namespace
 from pathlib import Path
 
 import pytest
 
-from roi_h import cli as cli_module
 from roi_h.harness import workspace as workspace_module
 from roi_h.harness.lease import run_lease
 from roi_h.harness.workspace import (
@@ -23,6 +21,13 @@ from roi_h.harness.workspace import (
     set_active_project,
     validate_project_name,
 )
+
+
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symbolic links are unavailable: {exc}")
 
 
 def test_create_list_use_project(tmp_path: Path) -> None:
@@ -130,21 +135,6 @@ def test_init_project_infers_only_exact_project_root(
         init_project(home)
 
 
-def test_project_open_uses_the_managed_project_root(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    home = tmp_path / "home"
-    create_project(home, "demo")
-    opened: list[Path] = []
-    monkeypatch.setattr(cli_module, "_open_directory", opened.append)
-
-    result = cli_module._cmd_project_open(Namespace(home=str(home), name="demo", env="dev"))
-
-    assert result["opened"] == "project://"
-    assert opened == [(home / "projects" / "demo").resolve()]
-
-
 def test_project_retention_configuration_is_validated(tmp_path: Path) -> None:
     home = tmp_path / "home"
     create_project(home, "demo", log_retention="forever")
@@ -174,7 +164,7 @@ def test_project_create_rejects_symlinked_projects_root(tmp_path: Path) -> None:
     outside = tmp_path / "outside"
     home.mkdir()
     outside.mkdir()
-    (home / "projects").symlink_to(outside, target_is_directory=True)
+    _symlink_or_skip(home / "projects", outside)
 
     with pytest.raises(RuntimeError, match=r"path\.escape_denied"):
         create_project(home, "demo")
@@ -187,7 +177,7 @@ def test_project_open_rejects_project_symlink_outside_home(tmp_path: Path) -> No
     outside = tmp_path / "outside"
     project = home / "projects" / "demo"
     project.replace(outside)
-    project.symlink_to(outside, target_is_directory=True)
+    _symlink_or_skip(project, outside)
 
     with pytest.raises(ValueError, match="non-symlink"):
         init_project(home, "demo")
@@ -201,7 +191,7 @@ def test_project_open_rejects_child_symlink_outside_project(tmp_path: Path) -> N
     outside.mkdir()
     runs = project / "environments" / "dev" / "runs"
     runs.rmdir()
-    runs.symlink_to(outside, target_is_directory=True)
+    _symlink_or_skip(runs, outside)
 
     with pytest.raises(RuntimeError, match=r"path\.escape_denied"):
         init_project(home, "demo")

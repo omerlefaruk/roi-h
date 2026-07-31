@@ -84,21 +84,16 @@ def test_default_catalog_contains_every_contract_1_0_operation() -> None:
             ),
             "environment.show environment.set environment.doctor",
             ("store.status store.check store.backup store.restore.plan store.restore.apply"),
-            "tool.list tool.show tool.invoke",
             (
-                "run.start run.list run.show run.status run.events run.trace run.cancel "
-                "run.reconcile run.input.add run.files"
+                "run.list run.show run.status run.events run.trace run.cancel "
+                "run.input.add run.files"
             ),
-            "phase.list phase.begin phase.end phase.fail phase.skip phase.retry",
-            "approval.list approval.show approval.approve approval.reject",
-            "artifact.list artifact.show artifact.put artifact.export",
-            (
-                "skill.list skill.show skill.validate skill.define skill.promote "
-                "skill.delete.plan skill.delete.apply"
-            ),
+            "artifact.list artifact.show artifact.export",
+            "skill.list skill.show skill.validate",
             (
                 "automation.list automation.show automation.verify automation.compare "
-                "automation.ship automation.run"
+                "automation.source.list automation.source.show automation.source.put "
+                "automation.dev.run automation.ship automation.run"
             ),
             "secret.list secret.status secret.set secret.delete",
             "retention.plan retention.show retention.apply",

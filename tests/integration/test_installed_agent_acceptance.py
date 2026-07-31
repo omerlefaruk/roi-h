@@ -1,4 +1,4 @@
-"""Installed-wheel acceptance for the CLI-only external AI interface."""
+"""Installed-wheel acceptance for log-based, guidance-skill automation."""
 
 from __future__ import annotations
 
@@ -9,13 +9,12 @@ import subprocess
 import sys
 import zipfile
 from pathlib import Path
-from typing import Any, cast
-from uuid import uuid4
+from typing import Any
 
 _REPO_ROOT = Path(__file__).parents[2]
 
 
-def test_installed_cli_agent_acceptance_from_empty_home(  # noqa: PLR0915
+def test_installed_cli_runs_the_complete_modular_automation_lifecycle(  # noqa: PLR0915
     tmp_path: Path,
 ) -> None:
     wheel_dir = tmp_path / "wheel"
@@ -36,60 +35,51 @@ def test_installed_cli_agent_acceptance_from_empty_home(  # noqa: PLR0915
         check=False,
     )
     assert build.returncode == 0, build.stdout + build.stderr
+    wheel = next(wheel_dir.glob("roi_h-*.whl"))
+    with zipfile.ZipFile(wheel) as archive:
+        packaged_skills = [name for name in archive.namelist() if "/_skills/" in name]
+    assert packaged_skills
+    assert all(name.endswith((".md", "/")) for name in packaged_skills)
 
     environment = tmp_path / "installed"
     uv = shutil.which("uv")
     assert uv is not None
-    create_environment = subprocess.run(  # noqa: S603
-        [
-            uv,
-            "venv",
-            "--system-site-packages",
-            "--python",
-            sys.executable,
-            str(environment),
-        ],
+    created = _process(
+        [uv, "venv", "--system-site-packages", "--python", sys.executable, str(environment)],
         cwd=tmp_path,
-        text=True,
-        capture_output=True,
-        check=False,
     )
-    assert create_environment.returncode == 0, create_environment.stdout + create_environment.stderr
+    assert created.returncode == 0, created.stdout + created.stderr
     scripts = environment / ("Scripts" if os.name == "nt" else "bin")
     python = scripts / ("python.exe" if os.name == "nt" else "python")
-    install = subprocess.run(  # noqa: S603
-        [
-            uv,
-            "pip",
-            "install",
-            "--python",
-            str(python),
-            str(next(wheel_dir.glob("roi_h-*.whl"))),
-        ],
+    installed = _process(
+        [uv, "pip", "install", "--python", str(python), str(wheel)],
         cwd=tmp_path,
-        text=True,
-        capture_output=True,
-        check=False,
     )
-    assert install.returncode == 0, install.stdout + install.stderr
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+
     executable = scripts / ("roi-h.exe" if os.name == "nt" else "roi-h")
-    home = tmp_path / "empty-home"
-    isolated_cwd = tmp_path / "agent-work"
-    isolated_cwd.mkdir()
+    work = tmp_path / "agent-work"
+    work.mkdir()
+    home = tmp_path / "home"
     clean_environment = {
         key: value
         for key, value in os.environ.items()
         if key not in {"PYTHONPATH", "PYTHONHOME", "ROI_H_HOME"}
     }
 
-    described = _run(executable, isolated_cwd, clean_environment, "agent", "describe")
-    assert described.returncode == 0, described.stdout
-    operations = json.loads(described.stdout)["result"]["operations"]
-    assert len(operations) == 79
+    described = _process([str(executable), "agent", "describe"], cwd=work, env=clean_environment)
+    assert described.returncode == 0, described.stdout + described.stderr
+    operation_ids = {
+        item["operation_id"] for item in json.loads(described.stdout)["result"]["operations"]
+    }
+    assert "automation.source.put" in operation_ids
+    assert "automation.dev.run" in operation_ids
+    assert "tool.invoke" not in operation_ids
+    assert "skill.define" not in operation_ids
 
-    created = _call(
+    project = _call(
         executable,
-        isolated_cwd,
+        work,
         clean_environment,
         "project.create",
         {
@@ -97,648 +87,197 @@ def test_installed_cli_agent_acceptance_from_empty_home(  # noqa: PLR0915
             "arguments": {"home": str(home), "name": "acceptance"},
         },
     )
-    assert created["ok"] is True
+    assert project["ok"] is True
 
-    context = _run(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "agent",
-        "context",
-        "--home",
-        str(home),
-    )
-    assert json.loads(context.stdout)["result"]["project"] == "acceptance"
-
-    base = {
+    dev = {
         "context": {"project": "acceptance", "environment": "dev"},
         "arguments": {"home": str(home)},
     }
-    tools = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "tool.list",
-        {**base, "arguments": {**base["arguments"], "limit": 20}},
-    )
-    assert tools["result"]["items"]
-    shown_tool = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "tool.show",
-        {**base, "arguments": {**base["arguments"], "name": "files.hash"}},
-    )
-    assert shown_tool["result"]["input_schema"]["type"] == "object"
-
-    read_source = _skill_source("inspect", effect="read", approval=False)
-    write_source = _skill_source("echo", effect="write", approval=True)
-    for tool_name, source in (("inspect", read_source), ("echo", write_source)):
-        defined = _call(
-            executable,
-            isolated_cwd,
-            clean_environment,
-            "skill.define",
-            {
-                **base,
-                "idempotency_key": f"accept-define-{tool_name}",
-                "arguments": {
-                    **base["arguments"],
-                    "skill": "sample",
-                    "tool": tool_name,
-                    "description": f"Acceptance {tool_name}",
-                    "source": source,
-                },
-            },
-        )
-        assert defined["result"]["name"] == f"sample.{tool_name}"
-    validated = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "skill.validate",
-        {**base, "arguments": {**base["arguments"], "name": "sample"}},
-    )
-    assert validated["result"]["valid"] is True
-
-    started = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "run.start",
-        {
-            **base,
-            "idempotency_key": "accept-run",
-            "arguments": {
-                **base["arguments"],
-                "run_id": "installed-agent-run",
-                "goal": "Qualify the installed CLI",
-            },
-        },
-    )
-    assert started["result"]["run_id"] == "installed-agent-run"
-
-    listed = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "run.list",
-        {**base, "arguments": {**base["arguments"], "limit": 10}},
-    )
-    assert listed["result"]["items"][0]["run_id"] == "installed-agent-run"
-
-    input_source = isolated_cwd / "input.txt"
-    input_source.write_text("installed agent input", encoding="utf-8")
-    added_input = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "run.input.add",
-        {
-            **base,
-            "idempotency_key": "accept-input",
-            "context": {
-                "project": "acceptance",
-                "environment": "dev",
-                "run_id": "installed-agent-run",
-            },
-            "arguments": {
-                **base["arguments"],
-                "source": str(input_source),
-                "name": "input.txt",
-            },
-        },
-    )
-    assert added_input["result"]["path"] == "run://input/input.txt"
-
-    phase_context = {
-        **base,
-        "context": {
-            "project": "acceptance",
-            "environment": "dev",
-            "run_id": "installed-agent-run",
-        },
+    skills = _call(executable, work, clean_environment, "skill.list", dev)
+    assert {item["name"] for item in skills["result"]["items"]} >= {
+        "browser",
+        "excel",
+        "files",
+        "pdf",
     }
-    begun = _call(
+    files_skill = _call(
         executable,
-        isolated_cwd,
+        work,
         clean_environment,
-        "phase.begin",
-        {
-            **phase_context,
-            "idempotency_key": "accept-phase-begin",
-            "arguments": {**base["arguments"], "name": "qualification"},
-        },
+        "skill.show",
+        {**dev, "arguments": {**dev["arguments"], "name": "files"}},
     )
-    assert begun["ok"] is True
+    assert files_skill["result"]["valid"] is True
+    assert files_skill["result"]["documents"] == ["SKILL.md"]
 
-    read_step = _call(
+    source = _call(
         executable,
-        isolated_cwd,
+        work,
         clean_environment,
-        "tool.invoke",
+        "automation.source.put",
         {
-            **phase_context,
-            "idempotency_key": "accept-read-invoke",
+            **dev,
+            "idempotency_key": "accept-source",
             "arguments": {
-                **base["arguments"],
-                "name": "sample.inspect",
-                "arguments": {"value": "read result"},
-                "force": True,
-            },
-        },
-    )
-    assert read_step["result"]["status"] == "ok", json.dumps(read_step, indent=2)
-    pending = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "tool.invoke",
-        {
-            **phase_context,
-            "idempotency_key": "accept-write-invoke",
-            "arguments": {
-                **base["arguments"],
-                "name": "sample.echo",
-                "arguments": {"value": "write result"},
-            },
-        },
-    )
-    assert pending["result"]["status"] == "pending_approval"
-    approved = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "approval.approve",
-        {
-            **phase_context,
-            "idempotency_key": "accept-approve",
-            "arguments": {
-                **base["arguments"],
-                "approval_id": pending["result"]["approval_id"],
-                "by": "acceptance",
-            },
-        },
-    )
-    assert approved["result"]["status"] == "ok"
-    pending_reject = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "tool.invoke",
-        {
-            **phase_context,
-            "idempotency_key": "accept-write-reject",
-            "arguments": {
-                **base["arguments"],
-                "name": "sample.echo",
-                "arguments": {"value": "do not run"},
-            },
-        },
-    )
-    rejected = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "approval.reject",
-        {
-            **phase_context,
-            "idempotency_key": "accept-reject",
-            "arguments": {
-                **base["arguments"],
-                "approval_id": pending_reject["result"]["approval_id"],
-                "by": "acceptance",
-                "reason": "qualification rejection",
-            },
-        },
-    )
-    assert rejected["result"]["status"] == "denied"
-
-    ended = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "phase.end",
-        {
-            **phase_context,
-            "idempotency_key": "accept-phase-end",
-            "arguments": {**base["arguments"], "summary": {"qualified": True}},
-        },
-    )
-    assert ended["ok"] is True
-
-    trace = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "run.trace",
-        {
-            **phase_context,
-            "arguments": {**base["arguments"], "limit": 200},
-        },
-    )
-    assert trace["result"]["steps"]
-    event_page = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "run.events",
-        {
-            **phase_context,
-            "arguments": {**base["arguments"], "limit": 1},
-        },
-    )
-    if event_page["result"]["has_more"]:
-        resumed_events = _call(
-            executable,
-            isolated_cwd,
-            clean_environment,
-            "run.events",
-            {
-                **phase_context,
-                "arguments": {
-                    **base["arguments"],
-                    "limit": 200,
-                    "after": event_page["result"]["next_cursor"],
+                **dev["arguments"],
+                "name": "report",
+                "manifest": {
+                    "name": "report",
+                    "max_parallel": 2,
+                    "phases": [
+                        {
+                            "id": "left",
+                            "module": "phases.left",
+                            "parallel_safe": True,
+                        },
+                        {
+                            "id": "right",
+                            "module": "phases.right",
+                            "parallel_safe": True,
+                        },
+                        {
+                            "id": "verify",
+                            "module": "phases.verify",
+                            "role": "verify",
+                            "needs": ["left", "right"],
+                        },
+                    ],
                 },
+                "files": _phase_files(),
             },
-        )
-        assert resumed_events["result"]["items"]
+        },
+    )
+    assert source["result"]["files"] == [
+        "automation.json",
+        "phases/left.py",
+        "phases/right.py",
+        "phases/verify.py",
+    ]
 
-    artifact_source = isolated_cwd / "artifact.txt"
-    artifact_source.write_text("installed artifact", encoding="utf-8")
-    artifact = _call(
+    development = _call(
         executable,
-        isolated_cwd,
+        work,
         clean_environment,
-        "artifact.put",
+        "automation.dev.run",
         {
-            **phase_context,
-            "idempotency_key": "accept-artifact",
+            **dev,
+            "idempotency_key": "accept-dev-run",
             "arguments": {
-                **base["arguments"],
-                "source": str(artifact_source),
-                "name": "artifact.txt",
+                **dev["arguments"],
+                "name": "report",
+                "run_id": "accept-dev",
             },
         },
     )
-    artifact_id = artifact["result"]["artifact_id"]
-    exported_artifact = isolated_cwd / "artifact-export.txt"
-    exported = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "artifact.export",
-        {
-            **phase_context,
-            "idempotency_key": "accept-artifact-export",
-            "arguments": {
-                **base["arguments"],
-                "artifact_id": artifact_id,
-                "output": str(exported_artifact),
-            },
-        },
-    )
-    assert exported_artifact.read_text(encoding="utf-8") == "installed artifact"
-    assert exported["result"]["sha256"] == artifact["result"]["sha256"]
+    assert development["result"]["status"] == "completed"
+    assert development["result"]["verification_ok"] is True
 
-    promoted = _call(
+    shipped = _call(
         executable,
-        isolated_cwd,
+        work,
         clean_environment,
-        "skill.promote",
+        "automation.ship",
         {
-            **base,
-            "idempotency_key": "accept-promote",
-            "arguments": {**base["arguments"], "name": "sample"},
-        },
-    )
-    assert promoted["result"]["name"] == "sample"
-
-    for version in ("1.0.0", "1.0.1"):
-        shipped = _call(
-            executable,
-            isolated_cwd,
-            clean_environment,
-            "automation.ship",
-            {
-                **base,
-                "idempotency_key": f"accept-ship-{version}",
-                "arguments": {
-                    **base["arguments"],
-                    "name": "accepted-job",
-                    "version": version,
-                    "from_run": "installed-agent-run",
-                    "distill": True,
-                },
-            },
-        )
-        assert shipped["result"]["shipped"] is True
-    for operation in ("automation.show", "automation.verify"):
-        inspected = _call(
-            executable,
-            isolated_cwd,
-            clean_environment,
-            operation,
-            {
-                **base,
-                "arguments": {
-                    **base["arguments"],
-                    "name": "accepted-job",
-                    "version": "1.0.1",
-                },
-            },
-        )
-        assert inspected["result"]["package_digest"]
-    compared = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "automation.compare",
-        {
-            **base,
+            **dev,
+            "idempotency_key": "accept-ship",
             "arguments": {
-                **base["arguments"],
-                "name": "accepted-job",
-                "version_a": "1.0.0",
-                "version_b": "1.0.1",
+                **dev["arguments"],
+                "name": "report",
+                "version": "1.0.0",
+                "from_run": "accept-dev",
             },
         },
     )
-    assert compared["result"]["version_a"] == "1.0.0"
+    assert shipped["result"]["package_digest"].startswith("sha256:")
+
     prod = {
         "context": {"project": "acceptance", "environment": "prod"},
         "arguments": {"home": str(home)},
     }
-    for run_id, dry_run in (("accepted-dry", True), ("accepted-live", False)):
-        automated = _call(
-            executable,
-            isolated_cwd,
-            clean_environment,
-            "automation.run",
-            {
-                **prod,
-                "idempotency_key": f"accept-automation-{run_id}",
-                "arguments": {
-                    **prod["arguments"],
-                    "name": "accepted-job",
-                    "version": "1.0.1",
-                    "run_id": run_id,
-                    "dry_run": dry_run,
-                    "auto_approve": True,
-                    "force": True,
-                },
+    production = _call(
+        executable,
+        work,
+        clean_environment,
+        "automation.run",
+        {
+            **prod,
+            "idempotency_key": "accept-prod-run",
+            "arguments": {
+                **prod["arguments"],
+                "name": "report",
+                "run_id": "accept-prod",
             },
-        )
-        assert automated["result"]["run_id"] == run_id
-        if dry_run:
-            assert automated["result"]["dry_run"] is True
-        else:
-            assert automated["result"]["ok"] is True
+        },
+    )
+    assert production["result"]["status"] == "completed"
+    assert (
+        production["result"]["automation"]["package_digest"] == shipped["result"]["package_digest"]
+    )
 
-    secret_request = {
-        **base,
-        "idempotency_key": "accept-secret",
-        "arguments": {**base["arguments"], "name": "TOKEN"},
+    events = _call(
+        executable,
+        work,
+        clean_environment,
+        "run.events",
+        {
+            "context": {**prod["context"], "run_id": "accept-prod"},
+            "arguments": {"home": str(home), "run_id": "accept-prod", "limit": 50},
+        },
+    )
+    event_types = {item["type"] for item in events["result"]["items"]}
+    assert {"source.snapshotted", "phase.succeeded", "run.completed"} <= event_types
+
+
+def _phase_files() -> dict[str, str]:
+    worker = (
+        "def run(context):\n"
+        "    path = context.output_path(context.phase_id + '.txt')\n"
+        "    path.write_text(context.phase_id, encoding='utf-8')\n"
+        "    return {'artifacts': {context.phase_id: context.phase_id + '.txt'}}\n"
+    )
+    verify = (
+        "def run(context):\n"
+        "    left = context.dependencies['left']['left'].read_text(encoding='utf-8')\n"
+        "    right = context.dependencies['right']['right'].read_text(encoding='utf-8')\n"
+        "    assert left + right == 'leftright'\n"
+        "    return {'summary': {'verified': True}}\n"
+    )
+    return {
+        "phases/left.py": worker,
+        "phases/right.py": worker,
+        "phases/verify.py": verify,
     }
-    secret_value = f"value-{uuid4().hex}"
-    secret = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "secret.set",
-        secret_request,
-        secret_stdin=secret_value,
-    )
-    assert secret["result"]["name"] == "TOKEN"
-    assert secret_value not in json.dumps(secret)
-
-    backup = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "store.backup",
-        {
-            **base,
-            "idempotency_key": "accept-backup",
-            "arguments": {
-                **base["arguments"],
-                "output": str(tmp_path / "activegraph.backup.sqlite"),
-            },
-        },
-    )
-    task_id = backup["result"]["task"]["task_id"]
-    assert backup["result"]["task"]["state"] in {"queued", "working"}
-    assert str(tmp_path) not in json.dumps(backup)
-    waited = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "task.wait",
-        {
-            "arguments": {
-                "home": str(home),
-                "task_id": task_id,
-                "timeout_seconds": 10,
-            }
-        },
-    )
-    assert waited["result"]["state"] == "succeeded"
-    task = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "task.show",
-        {"arguments": {"home": str(home), "task_id": task_id}},
-    )
-    assert task["result"]["state"] == "succeeded"
-    first_task_events = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "task.events",
-        {"arguments": {"home": str(home), "task_id": task_id, "limit": 1}},
-    )
-    resumed_task_events = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "task.events",
-        {
-            "arguments": {
-                "home": str(home),
-                "task_id": task_id,
-                "limit": 20,
-                "after": first_task_events["result"]["items"][0]["event_id"],
-            }
-        },
-    )
-    assert resumed_task_events["result"]["items"][-1]["type"] == "task.succeeded"
-    waited_again = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "task.wait",
-        {
-            "arguments": {
-                "home": str(home),
-                "task_id": task_id,
-                "timeout_seconds": 1,
-            }
-        },
-    )
-    assert waited_again["result"]["state"] == "succeeded"
-    cancelled = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "task.cancel",
-        {
-            "arguments": {
-                "home": str(home),
-                "task_id": task_id,
-            }
-        },
-    )
-    assert cancelled["result"]["state"] == "succeeded"
-    checked_store = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "store.check",
-        {**base, "arguments": {**base["arguments"], "full": True}},
-    )
-    assert checked_store["result"]["ok"] is True
-    assert str(tmp_path) not in json.dumps(checked_store)
-
-    delete_plan = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "project.delete.plan",
-        {
-            **base,
-            "arguments": {**base["arguments"], "name": "acceptance"},
-        },
-    )
-    _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "skill.define",
-        {
-            **base,
-            "idempotency_key": "accept-stale-marker",
-            "arguments": {
-                **base["arguments"],
-                "skill": "stale",
-                "tool": "marker",
-            },
-        },
-    )
-    stale = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "project.delete.apply",
-        {
-            **base,
-            "idempotency_key": "accept-stale-apply",
-            "arguments": {
-                **base["arguments"],
-                "plan_id": delete_plan["result"]["plan_id"],
-            },
-        },
-        expected_exit=1,
-    )
-    assert stale["error"]["code"] == "plan.state_changed"
-    assert stale["changed"] is False
-
-    support = _call(
-        executable,
-        isolated_cwd,
-        clean_environment,
-        "support_bundle.create",
-        {
-            **base,
-            "idempotency_key": "accept-support",
-            "arguments": {
-                **base["arguments"],
-                "output": str(tmp_path / "support.zip"),
-            },
-        },
-    )
-    assert support["result"]["created"] is True
-    with zipfile.ZipFile(tmp_path / "support.zip") as archive:
-        support_text = "\n".join(
-            archive.read(name).decode("utf-8", errors="ignore") for name in archive.namelist()
-        )
-    assert secret_value not in support_text
-    event_text = json.dumps(trace) + json.dumps(event_page)
-    assert secret_value not in event_text
-    for path in home.rglob("*"):
-        if not path.is_file():
-            continue
-        assert secret_value.encode() not in path.read_bytes()
 
 
-def _call(  # noqa: PLR0913 - process boundary inputs stay explicit.
+def _call(
     executable: Path,
     cwd: Path,
     environment: dict[str, str],
     operation: str,
     request: dict[str, Any],
-    *,
-    secret_stdin: str | None = None,
-    expected_exit: int = 0,
 ) -> dict[str, Any]:
-    request_file = cwd / f"{operation.replace('.', '-')}-{uuid4().hex}.json"
-    request_file.write_text(json.dumps(request), encoding="utf-8")
-    arguments = ["agent", "call", operation, "--input", str(request_file)]
-    if secret_stdin is not None:
-        arguments.append("--secret-stdin")
-        assert secret_stdin not in arguments
-    completed = _run(
-        executable,
-        cwd,
-        environment,
-        *arguments,
-        stdin=secret_stdin,
+    completed = _process(
+        [str(executable), "agent", "call", operation, "--input", "-"],
+        cwd=cwd,
+        env=environment,
+        stdin=json.dumps(request),
     )
-    payload = cast("dict[str, Any]", json.loads(completed.stdout))
-    assert completed.returncode == expected_exit, payload
+    payload = json.loads(completed.stdout)
+    assert completed.returncode == 0, payload
     return payload
 
 
-def _skill_source(tool_id: str, *, effect: str, approval: bool) -> str:
-    return (
-        "from pydantic import BaseModel\n"
-        f"TOOL_ID={tool_id!r}\n"
-        f"TOOL_EFFECT={effect!r}\n"
-        f"REQUIRES_APPROVAL={approval!r}\n"
-        "ALLOW_IN_PROD=True\n"
-        "IDEMPOTENCY='key'\n"
-        "class Input(BaseModel):\n"
-        "    value: str = ''\n"
-        "class Output(BaseModel):\n"
-        "    ok: bool = True\n"
-        "    result: str = ''\n"
-        "def run(args: Input) -> Output:\n"
-        "    return Output(ok=True, result=args.value)\n"
-    )
-
-
-def _run(
-    executable: Path,
+def _process(
+    command: list[str],
+    *,
     cwd: Path,
-    environment: dict[str, str],
-    *arguments: str,
+    env: dict[str, str] | None = None,
     stdin: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603
-        [str(executable), *arguments],
+        command,
         cwd=cwd,
-        env=environment,
+        env=env,
         input=stdin,
         text=True,
         capture_output=True,

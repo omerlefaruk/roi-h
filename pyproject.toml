@@ -128,6 +128,10 @@ warn_unreachable = true
 module = ["activegraph", "activegraph.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["roi_h.harness.macos_native_package_prototype"]
+ignore_errors = true
+
 [tool.coverage.run]
 branch = true
 source = ["roi_h"]

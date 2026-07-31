@@ -107,6 +107,18 @@ class RunStorage:
         if paths.root.exists():
             self._validate_existing(paths)
             return paths
+        return self._create(paths, run_id)
+
+    def reserve(self, run_id: str) -> RunPaths:
+        """Reserve a new run identity exactly once."""
+        paths = self.paths(run_id)
+        if paths.root.exists():
+            msg = f"run id already exists: {run_id}"
+            raise FileExistsError(msg)
+        return self._create(paths, run_id)
+
+    def _create(self, paths: RunPaths, run_id: str) -> RunPaths:
+        """Create one new run tree through same-filesystem staging."""
         staging = paths.root.with_name(f".{run_id}.prepare-{uuid.uuid4().hex}")
         try:
             for relative in (
@@ -132,6 +144,9 @@ class RunStorage:
                 },
                 mode=0o600,
             )
+            if paths.root.exists():
+                msg = f"run id already exists: {run_id}"
+                raise FileExistsError(msg)
             staging.replace(paths.root)
         finally:
             if staging.exists():
@@ -178,16 +193,6 @@ class RunStorage:
         _validate_artifact_name(dest_name)
 
         digest, byte_count = hash_file(source_path)
-        same_name = next(
-            (item for item in self.list(run_id) if item.name == dest_name),
-            None,
-        )
-        if same_name is not None:
-            if same_name.sha256 == digest:
-                return same_name
-            msg = f"artifact.identity_conflict: {dest_name!r} already has a different digest"
-            raise FileExistsError(msg)
-
         artifact_id = f"art_{uuid.uuid4().hex}"
         final = paths.artifacts / f"{artifact_id}--{dest_name}"
         fd, raw_staging = tempfile.mkstemp(prefix=_STAGING_PREFIX, dir=paths.artifacts)

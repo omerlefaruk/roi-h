@@ -48,7 +48,7 @@ class PathCapabilityError(PermissionError):
 
 @dataclass(frozen=True)
 class LogicalPath:
-    """Strict portable path value stored in recipes and durable records."""
+    """Strict portable path value stored in manifests and durable records."""
 
     scheme: LogicalScheme
     root: str
@@ -313,7 +313,7 @@ def normalize_tool_output(value: Any, *, scope: PathScope) -> Any:
 
 
 def detect_physical_paths(value: Any) -> list[str]:
-    """Find absolute path strings in a nested recipe or manifest."""
+    """Find absolute path strings in a nested manifest or durable record."""
     found: list[str] = []
 
     def visit(item: Any) -> None:

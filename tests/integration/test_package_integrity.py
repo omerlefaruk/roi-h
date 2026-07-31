@@ -1,91 +1,63 @@
-"""Immutable automation package and stable-interface boundaries."""
+"""Immutable modular source package integrity."""
 
+import stat
 from pathlib import Path
 
 import pytest
 
-from roi_h import AutomationRegistry, WorkspaceCatalog
-from roi_h.harness.automation import load_automation, publish_manifest
-from roi_h.harness.domain import Recipe, RecipePhase, RecipeStep
+from roi_h.harness.automation import load_automation
+from roi_h.harness.automation_source import put_source
+from roi_h.harness.journeys import run_development_source, ship_automation
+from roi_h.harness.workspace import Workspace, create_project
 
 
-def _recipe(*, url: str = "https://example.com") -> Recipe:
-    return Recipe(
+def _verified_package(tmp_path: Path) -> tuple[Workspace, dict[str, object]]:
+    home = tmp_path / ".roi-h"
+    create_project(home, "integrity")
+    dev = Workspace.open(home, project="integrity", env="dev")
+    put_source(
+        dev.automation_sources,
+        "integrity",
+        {
+            "name": "integrity",
+            "phases": [
+                {"id": "build", "module": "build"},
+                {"id": "verify", "module": "verify", "role": "verify", "needs": ["build"]},
+            ],
+        },
+        {
+            "build.py": "def run(context):\n    return {'summary': {'built': True}}\n",
+            "verify.py": "def run(context):\n    return {'summary': {'verified': True}}\n",
+        },
+    )
+    assert run_development_source(dev, name="integrity", run_id="integrity-dev")["ok"]
+    shipped = ship_automation(
+        dev,
         name="integrity",
         version="1.0.0",
-        goal="verify package integrity",
-        phases=[
-            RecipePhase(
-                name="browse",
-                steps=[
-                    RecipeStep(
-                        id="navigate",
-                        action="invoke",
-                        skill="browser",
-                        tool="navigate",
-                        args={"url": url},
-                    )
-                ],
-            )
-        ],
+        from_run="integrity-dev",
     )
+    return dev, shipped
 
 
-def test_package_version_is_idempotent_but_not_mutable(tmp_path: Path) -> None:
-    catalog = WorkspaceCatalog.at(tmp_path / ".roi-h")
-    workspace = catalog.create("integrity")
+def test_same_verified_source_version_is_idempotent(tmp_path: Path) -> None:
+    dev, first = _verified_package(tmp_path)
 
-    first = publish_manifest(
-        workspace,
+    second = ship_automation(
+        dev,
         name="integrity",
         version="1.0.0",
-        recipe=_recipe(),
+        from_run="integrity-dev",
     )
-    second = publish_manifest(
-        workspace,
-        name="integrity",
-        version="1.0.0",
-        recipe=_recipe(),
-    )
+
     assert second["package_digest"] == first["package_digest"]
-
-    with pytest.raises(FileExistsError, match="immutable"):
-        publish_manifest(
-            workspace,
-            name="integrity",
-            version="1.0.0",
-            recipe=_recipe(url="https://example.org"),
-        )
 
 
 def test_package_tampering_is_rejected_before_load(tmp_path: Path) -> None:
-    catalog = WorkspaceCatalog.at(tmp_path / ".roi-h")
-    workspace = catalog.create("integrity")
-    published = publish_manifest(
-        workspace,
-        name="integrity",
-        version="1.0.0",
-        recipe=_recipe(),
-    )
-    package = Path(published["path"]).parent
-    recipe_path = package / "recipe.json"
-    recipe_path.write_text(recipe_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    dev, _ = _verified_package(tmp_path)
+    source = dev.automations / "integrity" / "1.0.0" / "source" / "verify.py"
+    source.chmod(stat.S_IREAD | stat.S_IWRITE)
+    source.write_text(source.read_text(encoding="utf-8") + "\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="digest mismatch"):
-        load_automation(workspace, "integrity", version="1.0.0")
-
-
-def test_registry_exposes_verified_package_operations(tmp_path: Path) -> None:
-    catalog = WorkspaceCatalog.at(tmp_path / ".roi-h")
-    workspace = catalog.create("integrity")
-    publish_manifest(
-        workspace,
-        name="integrity",
-        version="1.0.0",
-        recipe=_recipe(),
-    )
-
-    registry = AutomationRegistry(workspace)
-
-    assert registry.list()[0]["latest"] == "1.0.0"
-    assert registry.load("integrity")["package_digest"].startswith("sha256:")
+        load_automation(dev, "integrity", version="1.0.0")

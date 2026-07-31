@@ -18,26 +18,43 @@ from roi_h.agent.operation_models import InputArguments, OperationResult
 
 def test_public_operation_schemas_describe_required_arguments_and_results() -> None:
     catalog = build_catalog()
-    run_start = catalog.describe("run.start")[0]
-    assert run_start.input_schema["required"] == ["goal"]
-    assert run_start.output_schema["required"] == [
-        "run_id",
-        "object_id",
-        "status",
-        "project",
-        "environment",
-    ]
-    assert run_start.output_schema["properties"]["run_id"] == {"type": "string"}
+    source_put = catalog.describe("automation.source.put")[0]
+    assert source_put.input_schema["required"] == ["name", "manifest", "files"]
+    assert "phases" in source_put.input_schema["$defs"]["AutomationSourceManifest"]["properties"]
 
-    tool_invoke = catalog.describe("tool.invoke")[0]
-    assert tool_invoke.input_schema["properties"]["approval_mode"] == {
-        "enum": ["required", "full"],
-        "type": "string",
+    dev_run = catalog.describe("automation.dev.run")[0]
+    assert dev_run.input_schema["required"] == ["name"]
+    assert dev_run.timeout_seconds == 172800
+    assert set(dev_run.output_schema["required"]) == {
+        "ok",
+        "run_id",
+        "environment",
+        "automation",
+        "source_digest",
+        "status",
+        "verification_ok",
+        "phase_states",
+        "phases",
     }
-    assert (
-        "run:input:read"
-        in tool_invoke.input_schema["properties"]["filesystem_grants"]["items"]["enum"]
-    )
+
+    source_output = source_put.output_schema
+    assert set(source_output["required"]) == {
+        "ok",
+        "name",
+        "source_digest",
+        "files",
+        "phase_plan",
+    }
+    for operation_id in (
+        "automation.source.list",
+        "automation.source.show",
+        "automation.list",
+        "automation.show",
+        "automation.compare",
+    ):
+        schema = catalog.describe(operation_id)[0].output_schema
+        assert schema.get("additionalProperties") is False
+        assert schema.get("required")
 
     run_input = catalog.describe("run.input.add")[0]
     assert any(
@@ -70,14 +87,14 @@ def test_operation_models_publish_unchanged_contract_1_0_manifests() -> None:
     fingerprint = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
-    assert fingerprint == "f0a3c336d849c3c87f8eed698eedadfc2b9ca69a2483b92e713445a68b5c2028"
+    assert fingerprint == "0539c8a8ce7d8a51a72dbf8a0a7463ac748122ed62895d994da5963003f424ce"
 
 
 def test_dispatcher_rejects_missing_required_operation_arguments() -> None:
     result = Dispatcher().execute(
-        "run.start",
+        "automation.source.put",
         CommandRequest(
-            idempotency_key="missing-goal",
+            idempotency_key="missing-source",
             arguments={"home": "agent-schema-home"},
         ),
     )

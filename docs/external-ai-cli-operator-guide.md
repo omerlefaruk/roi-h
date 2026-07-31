@@ -1,205 +1,89 @@
 # External AI CLI Operator Guide
 
-ROI-H has one external AI contract. The installed `roi-h` command is the universal
-transport. A native bridge can expose the same live operation IDs and schemas, but it
-must not add product behavior or policy.
+ROI-H has one typed external interface. Use a native bridge when available. Otherwise use
+the installed `roi-h agent` commands. Do not access ActiveGraph SQLite or project storage
+directly.
 
-Codex, Claude, Gemini, and generic shell agents use the same JSON contract. They do not
-need source access. They must not read the ActiveGraph SQLite file.
-
-## Discover the interface
+## Discover and call operations
 
 ```shell
+roi-h agent context
 roi-h agent describe
-roi-h agent describe run.start
-roi-h agent context --home "$ROI_H_HOME"
+roi-h agent describe automation.source.put
+roi-h agent call automation.source.put --input request.json
 ```
 
-Standard output contains one JSON result. A successful command exits with code `0`. An
-operation failure exits with code `1`. Invalid agent syntax or input exits with code `2`.
-Standard error stays empty in agent mode.
+Standard output is one JSON result. Success exits with code `0`. An operation failure exits
+with code `1`. Invalid syntax or input exits with code `2`.
 
-## Call an operation
+The live operation manifest is the authority for arguments, effects, idempotency, plans,
+secrets, pagination, tasks, and time limits. Use a stable `idempotency_key` for each write.
+After a lost response, retry the same operation, context, arguments, and key.
 
-Create a request file:
+## Guidance skills
 
-```json
-{
-  "schema_version": "1.0",
-  "request_id": "req_example_1",
-  "idempotency_key": "example-project-create-1",
-  "context": {},
-  "arguments": {
-    "home": "/path/to/data-home",
-    "name": "example"
-  }
-}
+Use `skill.list` and `skill.show`. A skill contains only `SKILL.md` and optional Markdown
+references. It supplies guidance to the AI. It does not define actions and it never runs a
+script.
+
+## Create modular source
+
+Use `automation.source.put` in development. Supply:
+
+- `name`;
+- a manifest object that follows the live schema; and
+- a `files` object that maps portable relative paths to text source.
+
+Create small phase modules. Put shared code in `lib/`. Declare dependency edges with
+`needs`. Set `parallel_safe` only when concurrent phase execution is safe. Include at least
+one phase with role `verify`.
+
+Each module exports:
+
+```python
+def run(context):
+    path = context.output_path("result.txt")
+    path.write_text("result", encoding="utf-8")
+    return {
+        "summary": {"verified": True},
+        "artifacts": {"result": "result.txt"},
+    }
 ```
 
-Call the operation:
+The context supplies `input_dir`, `reference_dir`, `work_dir`, `output_dir`, dependency
+artifacts, phase and attempt identities, and `secret(name)` for declared secrets.
 
-```shell
-roi-h agent call project.create --input request.json
-```
+## Development, shipping, and production
 
-Use `--input -` only when standard input contains the request JSON:
+1. Run editable source with `automation.dev.run` in `dev`.
+2. Inspect `run.status`, `run.events`, `run.trace`, and artifacts.
+3. Change the source and use a new run ID when verification fails.
+4. Ship the successful run with `automation.ship`.
+5. Verify the immutable package with `automation.verify`.
+6. Use `automation.run` in `prod` only when the user requests a production run.
 
-```shell
-printf '%s' "$REQUEST_JSON" | roi-h agent call project.list --input -
-```
+ROI-H freezes source before a run. Shipping uses only that frozen tree and its ActiveGraph
+verification evidence. Production verifies the package and source digests before execution.
 
-## Approval modes
+## Inputs and outputs
 
-`tool.invoke` uses `approval_mode: "required"` by default. It returns a pending approval
-when policy or tool metadata requires one. Use `approval_mode: "full"` only when the user
-explicitly authorizes full or unattended tool execution for that scope. An explicit mode
-takes precedence over the legacy `auto_approve` and `force` flags. Full mode does not bypass
-production policy, secret handling, or destructive plan-and-apply operations.
+`automation.dev.run` and `automation.run` can materialize input files through their typed
+`inputs` argument. Phase code reads them from `context.input_dir`. Input names and hashes
+are recorded in ActiveGraph.
 
-Development browser tools open a headed browser by default. An explicit `headless: true`
-tool argument or `ROI_H_BROWSER_HEADED=0` environment setting overrides that default.
+Phase files become durable artifacts only when the phase returns them in `artifacts`.
+Downstream phases read those artifact paths from `context.dependencies`.
 
-## Safe retries
+## Secrets and destructive actions
 
-Use a stable `idempotency_key` for each write. If a response is lost, send the same
-operation, context, arguments, and key again. ROI-H returns the first result. If the
-arguments change, ROI-H returns `request.idempotency_conflict`.
+Never put a secret value in a request JSON document, source file, manifest, log, plan, or
+artifact. Use `secret.set` with its separate secure standard-input channel. Phase source
+uses `context.secret(name)`.
 
-Do not retry an unknown write with a new key. First inspect the run, task, approval,
-artifact, or target state.
+For a destructive action, call its `.plan` operation, review the effects and blockers, and
+call `.apply` only after the user approves the plan.
 
 ## Long tasks
 
-A long operation returns a task identity. Keep that identity.
-
-```shell
-roi-h agent call task.show --input task-show.json
-roi-h agent call task.events --input task-events.json
-roi-h agent call task.wait --input task-wait.json
-roi-h agent call task.cancel --input task-cancel.json
-```
-
-Use the last event ID in the next `after` argument. Do not read all pages without a
-limit.
-
-## Background operations
-
-`store.backup` starts a detached durable task. The first response contains a queued task
-ID. Do not assume that the backup is ready. Wait for the terminal state:
-
-```shell
-roi-h agent call store.backup --input backup-request.json
-roi-h agent call task.wait --input task-wait-request.json
-```
-
-Use `task.events` to reconnect to the task event stream. A task can be `queued`,
-`working`, `succeeded`, `failed`, or `cancelled`. A working task is allowed to finish
-when cancellation cannot safely stop its database operation.
-
-## Destructive operations
-
-Call the `.plan` operation first. Review its exact effects, blockers, state digest, and
-expiry time. Then call the related `.apply` operation with the returned `plan_id`.
-
-Examples include:
-
-- `project.delete.plan` and `project.delete.apply`
-- `store.restore.plan` and `store.restore.apply`
-- `skill.delete.plan` and `skill.delete.apply`
-- `retention.plan`, `retention.show`, and `retention.apply`
-
-An expired plan returns `plan.expired`. A changed target returns `plan.state_changed`.
-Create a new plan after either result.
-
-## Secrets
-
-Never put a secret value in a command argument or request JSON file.
-
-Create a request file that contains the secret name, but not its value. Then use a
-separate standard input channel:
-
-```shell
-printf '%s' "$TOKEN" |
-  roi-h agent call secret.set --input secret-set-request.json --secret-stdin
-```
-
-For the human CLI, use:
-
-```shell
-printf '%s' "$TOKEN" | roi-h rpa secret set TOKEN --value-stdin
-roi-h rpa secret set TOKEN
-```
-
-The second human command uses a hidden terminal prompt.
-
-## Minimum agent sequence
-
-1. Call `system.version`, `system.describe`, and `system.context`.
-2. Select or create a project.
-3. Discover tools with `tool.list` and `tool.show`.
-4. Start or find a run.
-5. Use stable idempotency keys for writes.
-6. Read approvals, ordered events, and bounded traces.
-7. Use plan-and-apply for destructive work.
-8. Use task identities for long work.
-9. Read redacted diagnostics or create a support bundle when an operation fails.
-
-The operation manifest is the authority for effects, approvals, idempotency, secret
-inputs, pagination, and timeouts.
-
-## Installed agent instructions
-
-The managed installer adds one marked ROI-H block to the user-level instruction files:
-
-- `<CODEX_HOME>/AGENTS.md` when `CODEX_HOME` is set, otherwise
-  `<user-home>/.codex/AGENTS.md`; and
-- `<user-home>/.agents/AGENTS.md`.
-
-It also installs the `migrate-code-automation` agent skill under both corresponding
-`skills` directories. That skill guides migration of Python and JavaScript automations
-through native ROI-H operations, verification, package publication, and dry-run. During
-migration, the agent can inspect user-supplied legacy source read-only, but must not execute
-or change it. Target project writes and effects still use ROI-H.
-
-Existing instruction text stays unchanged. Install and update replace only the marked
-ROI-H block and the managed skill, so repeated installation does not create duplicates.
-The block tells agents to start with `roi-h agent context` and `roi-h agent describe`; it
-does not copy operation schemas or contain project names, paths, customer data, or secrets.
-
-Show the managed block or repair both files with:
-
-```shell
-roi-h instructions
-roi-h instructions --install
-```
-
-An AI agent reads these files only when its host supports that instruction location.
-The live ROI-H manifest remains the authority after instruction discovery.
-
-## Runtime skill contract
-
-A runtime skill `SKILL.md` file contains only guidance that the live manifest cannot express:
-
-```markdown
----
-name: skill-name
-description: When and why to use this skill.
----
-
-One short domain procedure, when required.
-```
-
-It must not copy operation schemas, command layouts, safety rules, model names, or
-orchestration. Installed agent skills can guide a cross-operation workflow, but must defer
-common operating rules and all schemas to the managed instructions and live manifest.
-Each executable tool module defines strict Pydantic `Input` and `Output`
-models, `run(args: Input) -> Output`, and its effect, idempotency, approval, production,
-timeout, secret, network, and filesystem metadata. Missing custom-tool security metadata
-fails closed. ROI-H inspects custom modules in a bounded worker and never imports them in
-the parent process.
-
-The current development worker is process isolation, not an operating-system sandbox.
-Custom skill Python is trusted local code; declared network and filesystem metadata guides
-the broker but cannot confine arbitrary Python. Production recipe replacement stays
-blocked until a verified, effect-restricted runner enforces those capabilities at the
-process boundary.
+Operations such as store backup return a task ID. Follow it with `task.show`, `task.events`,
+or `task.wait`. Continue from returned cursors and keep reads bounded.

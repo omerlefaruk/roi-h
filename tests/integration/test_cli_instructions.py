@@ -57,7 +57,8 @@ def test_instructions_install_preserves_existing_text_and_is_idempotent(
         assert text.count("<!-- ROI-H instructions: end -->") == 1
         assert "`roi-h agent context`" in text
         assert "`roi-h agent describe`" in text
-        assert '`approval_mode: "full"`' in text
+        assert "`automation.source.put`" in text
+        assert "Skills do not execute code" in text
         assert "inspect user-supplied source files" in text
     for root in (user_home / ".codex", user_home / ".agents"):
         skill = root / "skills" / "migrate-code-automation"

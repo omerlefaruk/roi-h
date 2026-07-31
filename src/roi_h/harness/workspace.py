@@ -53,6 +53,7 @@ class Workspace:
     project_skills: Path
     artifacts: Path
     runs: Path
+    automation_sources: Path
     automations: Path
     channels: Path
     reference: Path
@@ -137,6 +138,7 @@ class Workspace:
             # Compatibility name: callers pass this root to run-storage helpers.
             artifacts=runs.resolve(),
             runs=runs.resolve(),
+            automation_sources=(project_root / "sources" / "automations").resolve(),
             automations=(project_root / "packages" / "automations").resolve(),
             channels=(project_root / "channels" / active_env).resolve(),
             reference=(project_root / "reference").resolve(),
@@ -163,6 +165,7 @@ class Workspace:
             "db": str(self.db),
             "project_skills": str(self.project_skills),
             "runs": str(self.runs),
+            "automation_sources": str(self.automation_sources),
             "artifacts": str(self.artifacts),
             "automations": str(self.automations),
             "channels": str(self.channels),
@@ -205,6 +208,7 @@ def create_project(
             ".locks",
             "reference",
             "skills",
+            "sources/automations",
             "packages/automations",
             "channels/dev",
             "channels/prod",
@@ -359,8 +363,13 @@ def project_structure(workspace: Workspace) -> dict[str, Any]:
             {"path": "skills/", "storage": "skills/", "kind": "project-skills"},
             {
                 "path": "automations/",
+                "storage": "sources/automations/",
+                "kind": "automation-sources",
+            },
+            {
+                "path": "packages/",
                 "storage": "packages/automations/",
-                "kind": "automations",
+                "kind": "automation-packages",
             },
             {"path": "runs/", "storage": f"{runs}/", "kind": "runs"},
             {
@@ -636,6 +645,7 @@ def _ensure_project_roots(project_root: Path) -> None:
         ".locks",
         "reference",
         "skills",
+        "sources/automations",
         "packages/automations",
         "channels/dev",
         "channels/prod",
@@ -757,8 +767,12 @@ def _ensure_environment_roots(
     if manifest.exists():
         config = _read_config(manifest)
         execution = config.get("execution")
-        if isinstance(execution, dict) and "allow_adaptive" in execution:
-            del execution["allow_adaptive"]
+        if isinstance(execution, dict) and (
+            "allow_adaptive" in execution or "allow_ambient_project_skills" in execution
+        ):
+            execution.pop("allow_adaptive", None)
+            execution.pop("allow_ambient_project_skills", None)
+            execution["editable_automation_sources"] = env == "dev"
             atomic_write_json(manifest, config, mode=0o600)
         return
     atomic_write_json(
@@ -772,7 +786,7 @@ def _ensure_environment_roots(
                 "busy_timeout_ms": 10_000,
             },
             "execution": {
-                "allow_ambient_project_skills": env == "dev",
+                "editable_automation_sources": env == "dev",
             },
         },
         mode=0o600,

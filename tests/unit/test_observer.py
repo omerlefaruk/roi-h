@@ -12,7 +12,6 @@ from pathlib import Path
 import pytest
 from openpyxl import Workbook
 
-from roi_h import cli
 from roi_h.observer.projection import (
     catalog,
     get_run,
@@ -21,22 +20,6 @@ from roi_h.observer.projection import (
     resolve_artifact,
 )
 from roi_h.observer.server import ObserverServer
-
-
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["ui", "--home", "observer-home", "--port", "9000", "--no-open"],
-        ["rpa", "ui", "--home", "observer-home", "--port", "9000", "--no-open"],
-    ],
-)
-def test_ui_cli_shortcut_and_compatibility_alias(argv: list[str]) -> None:
-    args = cli._build_parser().parse_args(argv)  # noqa: SLF001
-
-    assert args.handler is cli._cmd_ui  # noqa: SLF001
-    assert args.home == "observer-home"
-    assert args.port == 9000
-    assert args.no_open is True
 
 
 def _event(

@@ -17,11 +17,13 @@ from uuid import uuid4
 from roi_h import __version__
 from roi_h.agent.contract import DestructivePlan
 from roi_h.harness.atomicfs import atomic_write_json
-from roi_h.harness.custom import define_project_tool, promote_to_global
+from roi_h.harness.automation_source import put_source
+from roi_h.harness.control import request_cancellation
 from roi_h.harness.diagnostics import DiagnosticSink
-from roi_h.harness.journeys import run_automation, ship_automation
+from roi_h.harness.journeys import run_automation, run_development_source, ship_automation
 from roi_h.harness.logical_paths import LogicalPath, PathResolver, PathScope
 from roi_h.harness.project_archive import ProjectArchive
+from roi_h.harness.records import evidenced_artifacts
 from roi_h.harness.retention import RetentionPlanner
 from roi_h.harness.run_storage import RunStorage
 from roi_h.harness.runtime_environment import (
@@ -40,7 +42,6 @@ from roi_h.harness.workspace import (
 
 if TYPE_CHECKING:
     from roi_h.agent.contract import CommandRequest
-    from roi_h.harness.application import RunSession
 
 
 def system_doctor(request: CommandRequest) -> dict[str, Any]:
@@ -285,16 +286,10 @@ def environment_set(request: CommandRequest) -> dict[str, Any]:
 
 
 def run_cancel(request: CommandRequest) -> dict[str, Any]:
-    return _session(request).cancel(
-        reason=str(request.arguments.get("reason") or "operator requested cancellation")
-    )
-
-
-def run_reconcile(request: CommandRequest) -> dict[str, Any]:
-    return _safe(
-        _session(request)
-        .reconcile(repair=request.arguments.get("repair") is True)
-        .model_dump(mode="json")
+    return request_cancellation(
+        _workspace(request),
+        _run_id(request),
+        reason=str(request.arguments.get("reason") or "operator requested cancellation"),
     )
 
 
@@ -369,83 +364,32 @@ def run_files(request: CommandRequest) -> dict[str, Any]:
                 for path in root.rglob("*")
                 if path.is_file() and not path.is_symlink()
             )
-    artifacts = [_safe(item.to_dict()) for item in RunStorage(workspace).list(run_id)]
+    artifacts = [_safe(item.to_dict()) for item in evidenced_artifacts(workspace, run_id)]
     return {"run_id": run_id, "files": files, "artifacts": artifacts}
-
-
-def phase_list(request: CommandRequest) -> dict[str, Any]:
-    items = _session(request).list_phases()
-    return {"run_id": _run_id(request), "items": _safe(items), "count": len(items)}
-
-
-def phase_begin(request: CommandRequest) -> dict[str, Any]:
-    return _safe(
-        _session(request).begin_phase(
-            _name(request),
-            description=str(request.arguments.get("description") or ""),
-            require_artifacts=_string_list(request.arguments.get("require_artifacts")),
-        )
-    )
-
-
-def phase_end(request: CommandRequest) -> dict[str, Any]:
-    return _safe(
-        _session(request).end_phase(
-            summary=_mapping(request.arguments.get("summary")),
-            require_artifacts=_string_list(request.arguments.get("require_artifacts")),
-        )
-    )
-
-
-def phase_fail(request: CommandRequest) -> dict[str, Any]:
-    return _safe(
-        _session(request).fail_phase(
-            error=_required_string(request, "error"),
-            summary=_mapping(request.arguments.get("summary")),
-        )
-    )
-
-
-def phase_skip(request: CommandRequest) -> dict[str, Any]:
-    return _safe(
-        _session(request).skip_phase(
-            _name(request),
-            reason=str(request.arguments.get("reason") or ""),
-        )
-    )
-
-
-def phase_retry(request: CommandRequest) -> dict[str, Any]:
-    return _safe(
-        _session(request).retry_phase(
-            _name(request),
-            description=str(request.arguments.get("description") or ""),
-            require_artifacts=_string_list(request.arguments.get("require_artifacts")),
-        )
-    )
-
-
-def artifact_put(request: CommandRequest) -> dict[str, Any]:
-    result = _session(request).put_artifact(
-        _required_string(request, "source"),
-        name=_optional_string(request, "name"),
-    )
-    result.pop("path", None)
-    return _safe(result)
 
 
 def artifact_export(request: CommandRequest) -> dict[str, Any]:
     workspace = _workspace(request)
-    storage = RunStorage(workspace)
     run_filter = request.context.run_id or request.arguments.get("run_id")
     artifact_id = _required_string(request, "artifact_id")
-    matches = [
-        (run_dir.name, item)
-        for run_dir in workspace.runs.iterdir()
-        if run_dir.is_dir() and not run_dir.name.startswith(".")
-        for item in storage.list(run_dir.name)
-        if item.artifact_id == artifact_id and (run_filter is None or run_dir.name == run_filter)
-    ]
+    run_ids = (
+        [str(run_filter)]
+        if run_filter is not None
+        else [
+            run_dir.name
+            for run_dir in workspace.runs.iterdir()
+            if run_dir.is_dir() and not run_dir.name.startswith(".")
+        ]
+    )
+    matches: list[tuple[str, Any]] = []
+    for run_id in run_ids:
+        try:
+            items = evidenced_artifacts(workspace, run_id)
+        except FileNotFoundError:
+            if run_filter is not None:
+                raise
+            continue
+        matches.extend((run_id, item) for item in items if item.artifact_id == artifact_id)
     if len(matches) != 1:
         msg = f"artifact.file_missing: expected one match, got {len(matches)}"
         raise FileNotFoundError(msg)
@@ -471,66 +415,6 @@ def artifact_export(request: CommandRequest) -> dict[str, Any]:
     }
 
 
-def skill_define(request: CommandRequest) -> dict[str, Any]:
-    workspace = _workspace(request)
-    return _safe(
-        define_project_tool(
-            skill=_required_string(request, "skill"),
-            tool=_required_string(request, "tool"),
-            description=str(request.arguments.get("description") or ""),
-            project_root=workspace.project_skills,
-            source=_optional_string(request, "source"),
-            source_path=_optional_string(request, "source_path"),
-            overwrite=request.arguments.get("overwrite") is True,
-        )
-    )
-
-
-def skill_promote(request: CommandRequest) -> dict[str, Any]:
-    workspace = _workspace(request)
-    result = promote_to_global(
-        skill=_name(request),
-        tool=_optional_string(request, "tool"),
-        project_root=workspace.project_skills,
-        global_root=workspace.shared_skills,
-        overwrite=request.arguments.get("overwrite") is True,
-    )
-    return _strip_physical_paths(result)
-
-
-def skill_delete_plan(request: CommandRequest) -> dict[str, Any]:
-    workspace = _workspace(request)
-    name = _name(request)
-    target = workspace.shared_skills / name
-    if not target.is_dir() or not (target / "SKILL.md").is_file():
-        msg = f"skill not found: {name}"
-        raise FileNotFoundError(msg)
-    plan = _new_plan(
-        workspace,
-        operation="skill.delete",
-        arguments={"name": name},
-        effects=[{"action": "move_to_recoverable_trash", "skill": name}],
-        state_digest=_path_digest(target),
-        apply_operation="skill.delete.apply",
-    )
-    return plan.model_dump(mode="json")
-
-
-def skill_delete_apply(request: CommandRequest) -> dict[str, Any]:
-    workspace = _workspace(request)
-    plan = _checked_plan(request, workspace, "skill.delete.apply")
-    name = str(plan.arguments["name"])
-    target = workspace.shared_skills / name
-    if not target.is_dir() or _path_digest(target) != plan.state_digest:
-        _state_changed()
-    trash = workspace.root / "trash" / "skills"
-    trash.mkdir(parents=True, exist_ok=True, mode=0o700)
-    destination = trash / f"{name}-{uuid4().hex}"
-    target.replace(destination)
-    _plan_path(workspace, plan.plan_id).unlink(missing_ok=True)
-    return {"skill": name, "recoverable": True}
-
-
 def automation_ship(request: CommandRequest) -> dict[str, Any]:
     result = ship_automation(
         _workspace(request),
@@ -539,8 +423,6 @@ def automation_ship(request: CommandRequest) -> dict[str, Any]:
         from_run=_required_string(request, "from_run"),
         goal=str(request.arguments.get("goal") or ""),
         notes=str(request.arguments.get("notes") or ""),
-        skills=_string_list(request.arguments.get("skills_list")),
-        distill=request.arguments.get("distill") is not False,
     )
     return _strip_physical_paths(result)
 
@@ -552,14 +434,49 @@ def automation_run(request: CommandRequest) -> dict[str, Any]:
             name=_name(request),
             version=_optional_string(request, "version"),
             run_id=_optional_string(request, "run_id"),
-            skills_root=_optional_string(request, "skills"),
-            dry_run=request.arguments.get("dry_run") is True,
-            from_handoff=_optional_string(request, "from_handoff"),
-            auto_approve=request.arguments.get("auto_approve"),
-            force=request.arguments.get("force") is not False,
             actor=str(request.arguments.get("actor") or "agent"),
-            set_args=_string_list(request.arguments.get("set_args")),
+            inputs=_string_mapping(request.arguments.get("inputs")),
         )
+    )
+
+
+def automation_source_put(request: CommandRequest) -> dict[str, Any]:
+    manifest = request.arguments.get("manifest")
+    files = request.arguments.get("files")
+    if not isinstance(manifest, dict):
+        msg = "manifest must be an object"
+        raise TypeError(msg)
+    if not isinstance(files, dict) or not all(
+        isinstance(key, str) and isinstance(value, str) for key, value in files.items()
+    ):
+        msg = "files must be an object of relative paths to text content"
+        raise TypeError(msg)
+    workspace = _workspace(request)
+    snapshot = put_source(
+        workspace.automation_sources,
+        _name(request),
+        cast("dict[str, Any]", manifest),
+        cast("dict[str, str]", files),
+    )
+    return {
+        "ok": True,
+        "name": snapshot.manifest.name,
+        "source_digest": snapshot.source_digest,
+        "files": snapshot.files,
+        "phase_plan": [
+            phase.model_dump(mode="json", by_alias=True) for phase in snapshot.manifest.phases
+        ],
+    }
+
+
+def automation_dev_run(request: CommandRequest) -> dict[str, Any]:
+    return run_development_source(
+        _workspace(request),
+        name=_name(request),
+        run_id=_optional_string(request, "run_id"),
+        goal=str(request.arguments.get("goal") or ""),
+        actor=str(request.arguments.get("actor") or "ai"),
+        inputs=_string_mapping(request.arguments.get("inputs")),
     )
 
 
@@ -666,17 +583,6 @@ def _workspace(request: CommandRequest) -> Workspace:
     )
 
 
-def _session(request: CommandRequest) -> RunSession:
-    from roi_h.harness.application import RunSession  # noqa: PLC0415
-
-    return RunSession.reopen(
-        _workspace(request),
-        run_id=_run_id(request),
-        skills_root=request.arguments.get("skills"),
-        auto_approve=False,
-    )
-
-
 def _run_id(request: CommandRequest) -> str:
     value = request.context.run_id or request.arguments.get("run_id")
     if not isinstance(value, str) or not value:
@@ -725,6 +631,17 @@ def _string_list(value: object) -> list[str] | None:
     return cast("list[str]", value)
 
 
+def _string_mapping(value: object) -> dict[str, str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not all(
+        isinstance(key, str) and isinstance(item, str) for key, item in value.items()
+    ):
+        msg = "value must be an object of string keys and values"
+        raise TypeError(msg)
+    return cast("dict[str, str]", value)
+
+
 def _project_checks(
     workspace: Workspace,
     runtime: RuntimeBootstrapReport | None = None,
@@ -739,6 +656,7 @@ def _project_checks(
             path.is_relative_to(workspace.project_root)
             for path in (
                 workspace.project_skills,
+                workspace.automation_sources,
                 workspace.automations,
                 workspace.channels,
                 workspace.reference,
@@ -850,7 +768,6 @@ def _strip_physical_paths(value: object) -> dict[str, Any]:
             "global_root",
             "shared_root",
             "copied",
-            "recipe_path",
             "distill_path",
             "skills_dir",
         }:
@@ -870,16 +787,11 @@ def _safe[T](value: T) -> T:
 
 __all__ = [
     "artifact_export",
-    "artifact_put",
+    "automation_dev_run",
     "automation_run",
     "automation_ship",
+    "automation_source_put",
     "environment_set",
-    "phase_begin",
-    "phase_end",
-    "phase_fail",
-    "phase_list",
-    "phase_retry",
-    "phase_skip",
     "project_doctor",
     "project_export",
     "project_import",
@@ -891,13 +803,8 @@ __all__ = [
     "run_cancel",
     "run_files",
     "run_input_add",
-    "run_reconcile",
     "secret_delete_operation",
     "secret_set_operation",
-    "skill_define",
-    "skill_delete_apply",
-    "skill_delete_plan",
-    "skill_promote",
     "store_restore_apply",
     "store_restore_plan",
     "support_bundle_create",

@@ -34,13 +34,12 @@ def test_accepts_retired_core_skills_only_in_history() -> None:
     ]
 
 
-def test_accepts_generic_core_files_and_public_skills() -> None:
+def test_accepts_generic_core_files_and_markdown_only_public_skills() -> None:
     paths = [
         "README.md",
         "docs/distribution-and-updates.md",
         "skills/browser/SKILL.md",
-        "skills/codex_chrome/SKILL.md",
-        "skills/excel/scripts/read_rows.py",
+        "skills/excel/references/formulas.md",
         "src/roi_h/_agent_skills/migrate-code-automation/SKILL.md",
         "src/roi_h/_agent_skills/migrate-code-automation/agents/openai.yaml",
         "src/roi_h/harness/automation.py",
@@ -48,3 +47,14 @@ def test_accepts_generic_core_files_and_public_skills() -> None:
     ]
 
     assert publication_violations(paths) == []
+
+
+def test_rejects_retired_or_executable_public_skill_content() -> None:
+    paths = [
+        "skills/codex_chrome/SKILL.md",
+        "skills/excel/scripts/read_rows.py",
+        "skills/browser/assets/icon.png",
+    ]
+
+    assert publication_violations(paths) == sorted(paths)
+    assert publication_violations(paths[:2], history=True) == []

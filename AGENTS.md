@@ -41,40 +41,31 @@ roi-h agent describe [OPERATION]
 roi-h agent call OPERATION --input FILE|-
 ```
 
-- The live operation manifest is the authority for schemas, effects, idempotency,
-  approvals, plans, pagination, tasks, secrets, and time limits. Never guess these fields.
+- The live operation manifest is the authority for schemas, effects, idempotency, plans,
+  pagination, tasks, secrets, and time limits. Never guess these fields.
 - Do not use human `roi-h rpa` commands, raw SQLite, ActiveGraph internals, or physical
   project paths as an external-AI interface.
 
 ### Execution loop
 
-1. Read the bounded context, warnings, recent runs, pending approvals, and safe next
-   actions.
-2. Reuse the relevant project and unfinished run when the goal matches. Otherwise, use or
-   create the smallest suitable project in `dev`.
-3. Discover only the tools and operation schemas needed for the goal.
-4. Start or continue one durable run. Perform the minimum useful steps and record evidence
-   as steps or artifacts.
-5. For a one-time request, complete and verify the requested result. Do not publish an
-   automation.
-6. When the user asks to automate or repeat the work, use the sequence
-   `explore -> solve -> verify`. Define a project skill only when built-in tools are not
-   sufficient. Ship an immutable automation only after the development run has evidence.
-7. Run a production automation only when the user clearly requests that production or
-   live run.
-8. Follow task IDs, event cursors, approvals, structured remediation, and `next_actions`
-   until the work reaches a terminal state.
-9. Verify the result with status, trace, artifacts, hashes, or package verification as
-   applicable.
+1. Read the bounded context, warnings, recent runs, and safe next actions.
+2. Reuse the relevant project when the goal matches. Otherwise, use or create the smallest
+   suitable project in `dev`.
+3. Read only the guidance skills and operation schemas needed for the goal.
+4. Create modular Python source with `automation.source.put`. Use separate work and
+   verification phase modules. Declare dependency edges and safe parallel phases.
+5. Run the frozen source with `automation.dev.run`. Follow event cursors until the run is
+   terminal. Inspect phase and artifact evidence.
+6. Change source and start a new development run when verification fails.
+7. Ship only a completed verified run with `automation.ship`.
+8. Run `automation.run` in `prod` only when the user clearly requests the live production
+   run.
+9. Verify the result with status, trace, artifacts, hashes, and package verification.
 
 ### Autonomy and safety
 
 - Perform reads and reversible internal development setup without asking "Should I
   continue?"
-- Do not use `force` or `auto_approve` to hide an approval. Use them only when the user
-  explicitly requests unattended execution for that stated scope and ROI-H permits it.
-- If ROI-H returns a pending approval, show the exact effect and ask the user to approve or
-  reject it. Do not approve on the user's behalf.
 - For a destructive operation, create the plan first. Show its effects and blockers. Apply
   it only after the user explicitly approves that plan.
 - Never invent a secret. Use `secret.set` through its secure input channel so the value is
@@ -117,7 +108,7 @@ Report:
 - Add or update one focused runnable check for non-trivial behavior.
 - Run focused tests first. Use `uv run python scripts/qualify_release.py` for release,
   packaging, installer, contract, or publication changes.
-- Do not hand-edit generated recipes or immutable automation packages.
+- Do not hand-edit immutable automation packages.
 - Do not put user projects, customer data, artifacts, browser state, databases, secrets,
   or custom automations in this repository.
 - Keep the terms `project`, `run`, `skill`, `automation`, and `artifact` consistent with
