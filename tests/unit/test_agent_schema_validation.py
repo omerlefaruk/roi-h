@@ -33,6 +33,15 @@ def test_public_operation_schemas_describe_required_arguments_and_results() -> N
         "enum": ["required", "full"],
         "type": "string",
     }
+    assert "run:input:read" in tool_invoke.input_schema["properties"][
+        "filesystem_grants"
+    ]["items"]["enum"]
+
+    run_input = catalog.describe("run.input.add")[0]
+    assert any(
+        option["required"] == ["from_run", "source_path"]
+        for option in run_input.input_schema["oneOf"]
+    )
 
     backup = catalog.describe("store.backup")[0]
     assert backup.execution_mode == "task"
@@ -51,7 +60,7 @@ def test_operation_models_publish_unchanged_contract_1_0_manifests() -> None:
     fingerprint = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
-    assert fingerprint == "7babfaef7c95217f66861c20f2aa6f46922612ab44238c8cbd2d806440d6e4ae"
+    assert fingerprint == "2ca634f1cbd30add714965475ff665bb43adc1b1de8e841ffc6c80281b3be000"
 
 
 def test_dispatcher_rejects_missing_required_operation_arguments() -> None:

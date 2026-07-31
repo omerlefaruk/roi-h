@@ -25,6 +25,7 @@ _WINDOWS_RESERVED = frozenset(
     }
 )
 _DRIVE_PREFIX = re.compile(r"^[A-Za-z]:")
+_RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _ARTIFACT_ID = re.compile(r"^art_[A-Za-z0-9_-]{8,128}$")
 _AUTOMATION_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _PATH_FIELD = re.compile(
@@ -136,25 +137,38 @@ class PathResolver:
             else LogicalPath.parse(logical_path)
         )
         workspace = scope.workspace
-        read_only = logical.scheme in {"project", "artifact", "automation"}
-        if read_only and intent != "read":
+        read_only = logical.scheme in {"project", "artifact", "automation"} or (
+            logical.scheme == "run" and logical.root == "input"
+        )
+        brokered_input_create = (
+            logical.scheme == "run" and logical.root == "input" and intent == "create"
+        )
+        if read_only and intent != "read" and not brokered_input_create:
             msg = f"path.capability_denied: {logical.scheme} paths are read-only"
             raise PathCapabilityError(msg)
 
         if logical.scheme == "project":
             root = workspace.reference
+            boundary = workspace.project_root
             relative = logical.segments
         elif logical.scheme == "run":
             if not scope.run_id:
                 msg = "path.invalid_logical_path: run scope is required"
                 raise LogicalPathError(msg)
-            root = workspace.runs / scope.run_id / "workspace" / logical.root
+            run_id = validate_run_id(scope.run_id)
+            root = workspace.runs / run_id / "workspace" / logical.root
+            boundary = workspace.environment_root
             relative = logical.segments
         elif logical.scheme == "artifact":
             if not scope.run_id:
                 msg = "path.invalid_logical_path: run scope is required"
                 raise LogicalPathError(msg)
-            artifact_root = workspace.runs / scope.run_id / "artifacts"
+            run_id = validate_run_id(scope.run_id)
+            boundary = workspace.environment_root
+            artifact_root = _resolve_scoped_root(
+                workspace.runs / run_id / "artifacts",
+                boundary,
+            )
             matches = list(artifact_root.glob(f"{logical.root}--*"))
             if len(matches) != 1:
                 msg = f"artifact.file_missing: {logical.root}"
@@ -164,9 +178,10 @@ class PathResolver:
         else:
             version = logical.segments[0]
             root = workspace.automations / logical.root / version
+            boundary = workspace.project_root
             relative = logical.segments[1:]
 
-        root = root.resolve()
+        root = _resolve_scoped_root(root, boundary)
         candidate = root.joinpath(*relative)
         _assert_contained(candidate, root)
         _assert_no_escaping_symlink(candidate, root)
@@ -186,14 +201,20 @@ class PathResolver:
             if not scope.run_id:
                 msg = "path.invalid_logical_path: relative path needs run scope"
                 raise LogicalPathError(msg)
-            path = scope.workspace.runs / scope.run_id / "workspace" / "work" / path
+            path = (
+                scope.workspace.runs
+                / validate_run_id(scope.run_id)
+                / "workspace"
+                / "work"
+                / path
+            )
         path = path.resolve()
         workspace = scope.workspace
         roots: list[tuple[Path, LogicalScheme, str]] = [
             (workspace.reference.resolve(), "project", "reference"),
         ]
         if scope.run_id:
-            run = workspace.runs / scope.run_id
+            run = workspace.runs / validate_run_id(scope.run_id)
             roots.extend(
                 [((run / "workspace" / name).resolve(), "run", name) for name in sorted(_RUN_ROOTS)]
             )
@@ -263,8 +284,10 @@ def materialize_tool_payload(
                 raise LogicalPathError(msg)
             value = f"run://work/{PurePosixPath(value).as_posix()}"
         logical = LogicalPath.parse(value)
-        intent: PathIntent = "read" if effect == "read" else "create"
         required = _capability_for(logical)
+        intent: PathIntent = (
+            "read" if effect == "read" or required.endswith(":read") else "create"
+        )
         if required not in allowed:
             msg = f"path.capability_denied: {required} is not declared; declared={sorted(allowed)}"
             raise PathCapabilityError(msg)
@@ -313,6 +336,14 @@ def detect_physical_paths(value: Any) -> list[str]:
     return found
 
 
+def validate_run_id(run_id: str) -> str:
+    """Reject run identities that can escape the selected environment."""
+    if not _RUN_ID.fullmatch(run_id):
+        msg = f"path.invalid_logical_path: invalid run id {run_id!r}"
+        raise LogicalPathError(msg)
+    return run_id
+
+
 def _capability_for(path: LogicalPath) -> str:
     suffix = "read-write"
     if path.scheme in {"project", "artifact", "automation"} or (
@@ -347,12 +378,29 @@ def _looks_absolute(value: str) -> bool:
     return value.startswith(("/", "\\\\")) or bool(_DRIVE_PREFIX.match(value))
 
 
+def _resolve_scoped_root(root: Path, boundary: Path) -> Path:
+    _assert_contained(root, boundary)
+    _assert_no_symlink(root, boundary)
+    resolved = root.resolve()
+    _assert_contained(resolved, boundary.resolve())
+    return resolved
+
+
 def _assert_contained(candidate: Path, root: Path) -> None:
     try:
         candidate.absolute().relative_to(root.absolute())
     except ValueError as exc:
         msg = "path.escape_denied: path escapes selected root"
         raise LogicalPathError(msg) from exc
+
+
+def _assert_no_symlink(candidate: Path, root: Path) -> None:
+    current = root
+    for segment in candidate.absolute().relative_to(root.absolute()).parts:
+        current = current / segment
+        if current.is_symlink():
+            msg = "path.escape_denied: logical root contains a symlink"
+            raise LogicalPathError(msg)
 
 
 def _assert_no_escaping_symlink(candidate: Path, root: Path) -> None:
@@ -379,4 +427,5 @@ __all__ = [
     "detect_physical_paths",
     "materialize_tool_payload",
     "normalize_tool_output",
+    "validate_run_id",
 ]

@@ -104,7 +104,11 @@ class Workspace:
 
         active_env = _resolve_env(env, home_config_path, project_name)
         for env_name in sorted(_VALID_ENVS):
-            _ensure_environment_roots(project_root / "environments" / env_name, env_name)
+            environment = project_root / "environments" / env_name
+            if environment.is_symlink():
+                msg = f"path.escape_denied: environment root is a symlink: {env_name}"
+                raise RuntimeError(msg)
+            _ensure_environment_roots(environment, env_name)
         environment_root = project_root / "environments" / active_env
         environment_config_path = environment_root / "environment.json"
 
