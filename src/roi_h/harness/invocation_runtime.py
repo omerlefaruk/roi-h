@@ -601,6 +601,7 @@ def _worker_environment(
         "ROI_H_BROWSER_HEADED",
         "ROI_H_BROWSER_SLOW_MO",
         "ROI_H_BROWSER_CONNECT_TIMEOUT_MS",
+        "ROI_H_CODEX_CHROME_FAKE_MODE",
     }
     env.update(
         {key: value for key, value in os.environ.items() if key.upper() in browser_environment}
