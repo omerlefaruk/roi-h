@@ -309,6 +309,7 @@ def _run_automation(
             project_skills=project_skills,
             budget=resolved_budget,
             auto_approve=auto_approve,
+            lease_held=True,
         )
     else:
         harness = RunSession.create(
@@ -318,6 +319,7 @@ def _run_automation(
             project_skills=project_skills,
             budget=resolved_budget,
             auto_approve=auto_approve,
+            lease_held=True,
         )
         goal = recipe.goal or f"run {recipe.name}@{recipe.version}"
         harness.start_run(

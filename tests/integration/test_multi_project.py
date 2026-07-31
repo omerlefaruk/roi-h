@@ -137,3 +137,56 @@ def test_project_isolation_and_switch(tmp_path: Path) -> None:
     )
     assert start.returncode == 0, start.stderr
     assert json.loads(start.stdout)["project"] == "beta"
+
+
+def test_project_init_uses_existing_managed_project_and_tree_is_logical(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / ".roi-h"
+    created = _roi_h(
+        "project",
+        "create",
+        "demo",
+        "--home",
+        str(home),
+        "--log-retention",
+        "30d",
+        cwd=tmp_path,
+    )
+    assert created.returncode == 0, created.stderr
+
+    initialized = _roi_h(
+        "project",
+        "init",
+        "demo",
+        "--home",
+        str(home),
+        "--env",
+        "prod",
+        cwd=tmp_path,
+    )
+    assert initialized.returncode == 0, initialized.stderr
+    init_payload = json.loads(initialized.stdout)
+    assert init_payload["project"] == "demo"
+    assert init_payload["environment"] == "prod"
+    assert str(home) not in initialized.stdout
+
+    tree = _roi_h("project", "tree", "demo", "--home", str(home), cwd=tmp_path)
+    assert tree.returncode == 0, tree.stderr
+    entries = {item["path"]: item["storage"] for item in json.loads(tree.stdout)["entries"]}
+    assert entries["runs/<run-id>/input/"].endswith("workspace/input/")
+    assert entries["runs/<run-id>/output/"].endswith("workspace/output/")
+    assert entries["runs/<run-id>/screenshots/"].endswith("artifacts/ (image artifacts)")
+    assert entries["runs/<run-id>/logs/"].endswith("diagnostics/")
+
+    missing = _roi_h(
+        "project",
+        "init",
+        "missing",
+        "--home",
+        str(home),
+        cwd=tmp_path,
+    )
+    assert missing.returncode == 1
+    assert "project create missing" in missing.stdout
+    assert not (home / "projects" / "missing").exists()

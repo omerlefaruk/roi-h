@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import json
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
 
+from roi_h import cli as cli_module
 from roi_h.harness import workspace as workspace_module
 from roi_h.harness.lease import run_lease
 from roi_h.harness.workspace import (
     Workspace,
+    configure_project,
     create_project,
     get_active_project,
-    init_home,
+    init_project,
     list_projects,
     resolve_home,
     set_active_env,
@@ -32,6 +35,9 @@ def test_create_list_use_project(tmp_path: Path) -> None:
     assert (project / "packages" / "automations").is_dir()
     assert (project / "environments" / "prod" / "store").is_dir()
     assert (project / "reference").is_dir()
+    assert json.loads((project / "project.json").read_text())["retention"][
+        "log_retention"
+    ] == "7d"
     assert (home / "skills").is_dir()
     assert get_active_project(home) == "acme-orders"
 
@@ -93,15 +99,116 @@ def test_env_lives_on_project_config(tmp_path: Path) -> None:
     assert Workspace.open(home).env == "prod"
 
 
-def test_init_home_creates_default(tmp_path: Path) -> None:
+def test_init_project_selects_existing_project_only(tmp_path: Path) -> None:
     home = tmp_path / "home"
-    result = init_home(home)
-    assert result["created"] is True
-    assert result["project"] == "default"
-    assert list_projects(home)[0]["name"] == "default"
+    create_project(home, "alpha")
+    create_project(home, "beta", set_active=False)
 
-    again = init_home(home)
-    assert again["created"] is False
+    result = init_project(home, "beta", env="prod", log_retention="30d")
+
+    assert result["created"] is False
+    assert result["project"] == "beta"
+    assert result["environment"] == "prod"
+    assert get_active_project(home) == "beta"
+    manifest = json.loads((home / "projects" / "beta" / "project.json").read_text())
+    assert manifest["retention"]["log_retention"] == "30d"
+    with pytest.raises(FileNotFoundError, match=r"project create missing"):
+        init_project(home, "missing")
+
+
+def test_init_project_infers_only_exact_project_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home"
+    create_project(home, "demo")
+    project = home / "projects" / "demo"
+    monkeypatch.chdir(project)
+    assert init_project(home)["project"] == "demo"
+
+    nested = project / "reference"
+    monkeypatch.chdir(nested)
+    with pytest.raises(ValueError, match="project name is required"):
+        init_project(home)
+
+
+def test_project_open_uses_the_managed_project_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home"
+    create_project(home, "demo")
+    opened: list[Path] = []
+    monkeypatch.setattr(cli_module, "_open_directory", opened.append)
+
+    result = cli_module._cmd_project_open(
+        Namespace(home=str(home), name="demo", env="dev")
+    )
+
+    assert result["opened"] == "project://"
+    assert opened == [(home / "projects" / "demo").resolve()]
+
+
+def test_project_retention_configuration_is_validated(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    create_project(home, "demo", log_retention="forever")
+    assert configure_project(home, "demo", log_retention="3d")["log_retention"] == "3d"
+
+    for invalid in ("0d", "1000000000d"):
+        with pytest.raises(ValueError, match="log retention"):
+            configure_project(home, "demo", log_retention=invalid)
+
+
+def test_init_project_repairs_only_missing_supported_directories(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    create_project(home, "demo")
+    reference = home / "projects" / "demo" / "reference"
+    reference.rmdir()
+    init_project(home, "demo")
+    assert reference.is_dir()
+
+    reference.rmdir()
+    reference.write_text("blocked", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        init_project(home, "demo")
+
+
+def test_project_create_rejects_symlinked_projects_root(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    outside = tmp_path / "outside"
+    home.mkdir()
+    outside.mkdir()
+    (home / "projects").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(RuntimeError, match=r"path\.escape_denied"):
+        create_project(home, "demo")
+    assert not (outside / "demo").exists()
+
+
+def test_project_open_rejects_project_symlink_outside_home(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    create_project(home, "demo")
+    outside = tmp_path / "outside"
+    project = home / "projects" / "demo"
+    project.replace(outside)
+    project.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="non-symlink"):
+        init_project(home, "demo")
+
+
+def test_project_open_rejects_child_symlink_outside_project(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    create_project(home, "demo")
+    project = home / "projects" / "demo"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    runs = project / "environments" / "dev" / "runs"
+    runs.rmdir()
+    runs.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(RuntimeError, match=r"path\.escape_denied"):
+        init_project(home, "demo")
 
 
 def test_workspace_open_does_not_require_home_write_access(
@@ -131,7 +238,7 @@ def test_project_home_access_error_is_actionable(
         PermissionError,
         match=r"ROI-H cannot write to data home .*Do not run ROI-H with sudo",
     ):
-        init_home(home)
+        create_project(home, "demo")
 
 
 def test_isolation_of_skills_and_db(tmp_path: Path) -> None:

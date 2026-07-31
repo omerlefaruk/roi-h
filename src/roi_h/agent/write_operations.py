@@ -34,6 +34,7 @@ def project_create(request: CommandRequest) -> dict[str, Any]:
         display_name=str(arguments.get("display_name") or ""),
         set_active=arguments.get("use") is not False,
         env=str(arguments.get("environment") or "dev"),
+        log_retention=str(arguments.get("log_retention") or "7d"),
     )
     return _safe(result)
 

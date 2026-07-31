@@ -72,6 +72,7 @@ class RunSession:
         project_skills: str | Path | None = None,
         budget: BudgetSpec | None = None,
         auto_approve: bool | None = None,
+        lease_held: bool = False,
     ) -> RunSession:
         """Create a SQLite-backed run with tools bound from global + project skills.
 
@@ -91,7 +92,7 @@ class RunSession:
         tools = catalog.to_activegraph_tools()
         limits = spec.to_activegraph_limits() or None
         graph = Graph(run_id=run_id)
-        RunStorage(workspace).prepare(graph.run_id)
+        RunStorage(workspace).activate(graph.run_id, lease_held=lease_held)
         invoker = IsolatedSkillInvoker(catalog, workspace)
         runtime = ROIHRuntime(
             graph,
@@ -119,10 +120,11 @@ class RunSession:
         project_skills: str | Path | None = None,
         budget: BudgetSpec | None = None,
         auto_approve: bool | None = None,
+        lease_held: bool = False,
     ) -> RunSession:
         """Reopen a durable run and re-bind global + project skill tools."""
         spec = budget or BudgetSpec()
-        RunStorage(workspace).prepare(run_id)
+        RunStorage(workspace).activate(run_id, lease_held=lease_held)
         project_root = (
             Path(project_skills) if project_skills is not None else workspace.project_skills
         )

@@ -44,11 +44,13 @@ from roi_h.harness.secrets import list_secrets
 from roi_h.harness.store_lifecycle import StoreLifecycle
 from roi_h.harness.workspace import (
     Workspace,
+    configure_project,
     create_project,
     delete_project,
     get_active_project,
-    init_home,
+    init_project,
     list_projects,
+    project_structure,
     resolve_home,
     set_active_env,
 )
@@ -176,6 +178,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
     if raw_argv[:1] == ["agent"]:
         return agent_main(raw_argv[1:])
+    if raw_argv[:1] == ["project"]:
+        raw_argv = ["rpa", *raw_argv]
     rewrites: dict[tuple[str, ...], tuple[str, ...]] = {
         ("rpa", "project", "delete", "plan"): ("rpa", "project", "delete-plan"),
         ("rpa", "project", "delete", "apply"): ("rpa", "project", "delete-apply"),
@@ -293,9 +297,28 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_workspace_options(project_show)
     project_show.set_defaults(handler=_cmd_project_show)
 
-    project_paths = project_sub.add_parser("paths", help="Show typed project paths")
+    project_paths = project_sub.add_parser("paths", help="Show logical project paths")
     _add_workspace_options(project_paths)
     project_paths.set_defaults(handler=_cmd_project_paths)
+
+    project_tree = project_sub.add_parser("tree", help="Show the developer project tree")
+    project_tree.add_argument("name", nargs="?", default=None)
+    project_tree.add_argument("--env", choices=["dev", "prod"], default=None)
+    project_tree.add_argument("--home", default=None)
+    project_tree.set_defaults(handler=_cmd_project_tree)
+
+    project_open = project_sub.add_parser("open", help="Open the managed project directory")
+    project_open.add_argument("name", nargs="?", default=None)
+    project_open.add_argument("--env", choices=["dev", "prod"], default=None)
+    project_open.add_argument("--home", default=None)
+    project_open.set_defaults(handler=_cmd_project_open)
+
+    project_debug_paths = project_sub.add_parser(
+        "debug-paths",
+        help="Show physical paths for local diagnosis",
+    )
+    _add_workspace_options(project_debug_paths)
+    project_debug_paths.set_defaults(handler=_cmd_project_debug_paths)
 
     project_doctor = project_sub.add_parser("doctor", help="Validate project storage")
     _add_workspace_options(project_doctor)
@@ -318,6 +341,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Do not change the active project",
     )
     project_create.add_argument("--env", choices=["dev", "prod"], default="dev")
+    project_create.add_argument("--log-retention", default="7d", metavar="Nd|forever")
     project_create.add_argument(
         "--home",
         default=None,
@@ -336,20 +360,23 @@ def _build_parser() -> argparse.ArgumentParser:
 
     project_init = project_sub.add_parser(
         "init",
-        help="Ensure home has a project (creates 'default' if empty)",
+        help="Select and verify an existing managed project",
     )
-    project_init.add_argument(
-        "--project",
-        default="default",
-        help="Name for the initial project when home is empty (default: default)",
-    )
-    project_init.add_argument("--display-name", default="")
+    project_init.add_argument("name", nargs="?", default=None)
+    project_init.add_argument("--env", choices=["dev", "prod"], default=None)
+    project_init.add_argument("--log-retention", default=None, metavar="Nd|forever")
     project_init.add_argument(
         "--home",
         default=None,
         help="Home root (default: ~/.roi-h or ROI_H_HOME)",
     )
     project_init.set_defaults(handler=_cmd_project_init)
+
+    project_config = project_sub.add_parser("config", help="Update supported project policy")
+    project_config.add_argument("name", nargs="?", default=None)
+    project_config.add_argument("--log-retention", required=True, metavar="Nd|forever")
+    project_config.add_argument("--home", default=None)
+    project_config.set_defaults(handler=_cmd_project_config)
 
     project_delete = project_sub.add_parser("delete", help="Delete a project (destructive)")
     project_delete.add_argument("name")
@@ -1028,14 +1055,31 @@ def _cmd_project_list(args: argparse.Namespace) -> dict[str, Any]:
 
 def _cmd_project_show(args: argparse.Namespace) -> dict[str, Any]:
     name = args.name or getattr(args, "project", None)
-    if name:
-        ws = Workspace.open(args.home, project=name, env=getattr(args, "env", None))
-    else:
-        ws = _workspace(args)
-    return {"ok": True, **ws.to_dict()}
+    ws = Workspace.open(args.home, project=name, env=getattr(args, "env", None))
+    return {"ok": True, **project_structure(ws)}
 
 
 def _cmd_project_paths(args: argparse.Namespace) -> dict[str, Any]:
+    return {"ok": True, **project_structure(_workspace(args))}
+
+
+def _cmd_project_tree(args: argparse.Namespace) -> dict[str, Any]:
+    ws = Workspace.open(args.home, project=args.name, env=args.env)
+    return {"ok": True, **project_structure(ws)}
+
+
+def _cmd_project_open(args: argparse.Namespace) -> dict[str, Any]:
+    ws = Workspace.open(args.home, project=args.name, env=args.env)
+    _open_directory(ws.project_root)
+    return {
+        "ok": True,
+        "project": ws.project,
+        "environment": ws.env,
+        "opened": "project://",
+    }
+
+
+def _cmd_project_debug_paths(args: argparse.Namespace) -> dict[str, Any]:
     return {"ok": True, **_workspace(args).to_dict()}
 
 
@@ -1090,6 +1134,7 @@ def _cmd_project_create(args: argparse.Namespace) -> dict[str, Any]:
         display_name=args.display_name,
         use=args.use,
         environment=args.env,
+        log_retention=args.log_retention,
     )
 
 
@@ -1106,7 +1151,17 @@ def _cmd_project_use(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _cmd_project_init(args: argparse.Namespace) -> dict[str, Any]:
-    return init_home(args.home, project=args.project, display_name=args.display_name)
+    return init_project(
+        args.home,
+        args.name,
+        env=args.env,
+        log_retention=args.log_retention,
+    )
+
+
+def _cmd_project_config(args: argparse.Namespace) -> dict[str, Any]:
+    project = args.name or Workspace.open(args.home).project
+    return configure_project(args.home, project, log_retention=args.log_retention)
 
 
 def _cmd_project_export(args: argparse.Namespace) -> dict[str, Any]:
@@ -1853,6 +1908,19 @@ def _validate_run_id(run_id: str) -> None:
 
 def _new_run_id(goal: str) -> str:
     return new_run_id(goal)
+
+
+def _open_directory(path: Path) -> None:
+    if sys.platform == "win32":
+        os.startfile(path)  # type: ignore[attr-defined]  # noqa: S606
+        return
+    command = "open" if sys.platform == "darwin" else "xdg-open"
+    subprocess.Popen(  # noqa: S603
+        [command, str(path)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
 
 
 def _emit(payload: dict[str, Any]) -> None:

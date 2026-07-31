@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 from roi_h.harness.atomicfs import atomic_write_json, hash_file
+from roi_h.harness.lease import run_lease
 from roi_h.harness.logical_paths import LogicalPath, PathResolver, PathScope, validate_run_id
 from roi_h.harness.workspace import Workspace
 
@@ -136,6 +137,28 @@ class RunStorage:
             if staging.exists():
                 shutil.rmtree(staging)
         return paths
+
+    def activate(self, run_id: str, *, lease_held: bool = False) -> RunPaths:
+        """Mark one run workspace active under its mutation lease."""
+        paths = self.prepare(run_id)
+        if lease_held:
+            self._mark_active(paths, run_id)
+        else:
+            with run_lease(self.workspace, run_id):
+                self._mark_active(paths, run_id)
+        return paths
+
+    def _mark_active(self, paths: RunPaths, run_id: str) -> None:
+        raw = json.loads(paths.manifest.read_text(encoding="utf-8"))
+        manifest = raw if isinstance(raw, dict) else {}
+        manifest.update(
+            run_id=run_id,
+            state="active",
+            terminal_status=None,
+            finalized_at=None,
+            activated_at=datetime.now(UTC).isoformat(),
+        )
+        atomic_write_json(paths.manifest, manifest, mode=0o600)
 
     def attach(
         self,

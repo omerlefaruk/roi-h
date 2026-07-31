@@ -7,7 +7,8 @@ import json
 import threading
 from typing import Literal
 
-from pydantic import create_model
+import pytest
+from pydantic import ValidationError, create_model
 
 from roi_h.agent.catalog import OperationCatalog, OperationDefinition, build_catalog
 from roi_h.agent.contract import CommandRequest, Effect, Idempotency, OperationManifest
@@ -43,6 +44,14 @@ def test_public_operation_schemas_describe_required_arguments_and_results() -> N
         for option in run_input.input_schema["oneOf"]
     )
 
+    project_create = catalog.definition("project.create").input_model
+    defaults = project_create.model_validate({"name": "demo"})
+    assert defaults.use is True
+    assert defaults.log_retention == "7d"
+    for invalid in ("0d", "1000000000d"):
+        with pytest.raises(ValidationError):
+            project_create.model_validate({"name": "demo", "log_retention": invalid})
+
     backup = catalog.describe("store.backup")[0]
     assert backup.execution_mode == "task"
     assert backup.input_schema["required"] == ["output"]
@@ -60,7 +69,7 @@ def test_operation_models_publish_unchanged_contract_1_0_manifests() -> None:
     fingerprint = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
-    assert fingerprint == "2ca634f1cbd30add714965475ff665bb43adc1b1de8e841ffc6c80281b3be000"
+    assert fingerprint == "f0a3c336d849c3c87f8eed698eedadfc2b9ca69a2483b92e713445a68b5c2028"
 
 
 def test_dispatcher_rejects_missing_required_operation_arguments() -> None:

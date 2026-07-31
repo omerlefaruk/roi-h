@@ -10,9 +10,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
-from typing import IO, Self
+from typing import IO, TYPE_CHECKING, Self
 
-from roi_h.harness.workspace import Workspace
+if TYPE_CHECKING:
+    from roi_h.harness.workspace import Workspace
 
 if sys.platform == "win32":
     import msvcrt
@@ -45,8 +46,15 @@ class RunLease:
 
     def __enter__(self) -> Self:
         """Acquire the lease and record its holder."""
+        if self.path.parent.is_symlink() or self.path.is_symlink():
+            msg = f"lease path must not be a symlink: {self.path}"
+            raise RuntimeError(msg)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        stream = self.path.open("a+", encoding="utf-8")
+        flags = os.O_RDWR | os.O_CREAT
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = os.open(self.path, flags, 0o600)
+        stream = os.fdopen(descriptor, "r+", encoding="utf-8")
         deadline = time.monotonic() + self.timeout_seconds
         while True:
             try:
@@ -94,6 +102,20 @@ class RunLease:
         _release_lock(stream)
         stream.close()
         self._stream = None
+
+
+def project_policy_lease(project_root: Path, *, timeout_seconds: float = 0.0) -> RunLease:
+    """Create the project-wide lease used by policy writers and cleanup."""
+    lock_root = project_root / ".locks"
+    path = lock_root / "project-policy.lock"
+    if lock_root.is_symlink() or path.is_symlink():
+        msg = "project policy lock must not be a symlink"
+        raise RuntimeError(msg)
+    return RunLease(
+        path=path,
+        run_id="project-policy",
+        timeout_seconds=timeout_seconds,
+    )
 
 
 def run_lease(workspace: Workspace, run_id: str, *, timeout_seconds: float = 0.0) -> RunLease:
