@@ -57,6 +57,38 @@ fi
     assert "supports only macOS ARM64. Detected Linux:x86_64" in completed.stderr
 
 
+def test_posix_bootstrap_rejects_root_install(tmp_path: Path) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_executable(
+        fake_bin / "uname",
+        """#!/bin/sh
+if [ "${1-}" = "-s" ]; then
+    printf 'Darwin\\n'
+else
+    printf 'arm64\\n'
+fi
+""",
+    )
+    _write_executable(fake_bin / "id", "#!/bin/sh\nprintf '0\\n'\n")
+
+    completed = subprocess.run(
+        ["/bin/sh", "install.sh"],
+        cwd=Path(__file__).parents[2],
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "HOME": str(tmp_path / "home"),
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert "Do not run the user installer as root or with sudo" in completed.stderr
+
+
 @pytest.mark.parametrize(
     ("managed", "expected_operation"),
     [(False, "install"), (True, "update")],

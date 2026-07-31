@@ -31,6 +31,15 @@ if ([string]::IsNullOrWhiteSpace($operatingSystemArchitecture)) {
 if ($operatingSystemArchitecture -ne "AMD64") {
     Stop-Install "This release supports Windows x86-64 only."
 }
+$currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$currentPrincipal = [Security.Principal.WindowsPrincipal]::new($currentIdentity)
+if (
+    $currentPrincipal.IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator
+    )
+) {
+    Stop-Install "Do not run the user installer as Administrator. Run it as the target user."
+}
 
 $installerVersion = if (
     [string]::IsNullOrWhiteSpace($env:ROI_H_INSTALLER_VERSION)
@@ -86,8 +95,37 @@ $installRoot = if (-not [string]::IsNullOrWhiteSpace($env:ROI_H_INSTALL_ROOT)) {
 $dataHome = if (-not [string]::IsNullOrWhiteSpace($env:ROI_H_HOME)) {
     $env:ROI_H_HOME
 } else {
-    Join-Path $HOME ".roi-h"
+    Join-Path $env:USERPROFILE ".roi-h"
 }
+
+function Assert-UserWritablePath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (Test-Path -LiteralPath $Path -PathType Leaf) {
+        Stop-Install "The path is a file, not a directory: $Path"
+    }
+    $candidate = [IO.DirectoryInfo]$Path
+    $probeDirectory = $candidate
+    while (-not $probeDirectory.Exists -and $null -ne $probeDirectory.Parent) {
+        $probeDirectory = $probeDirectory.Parent
+    }
+    if (-not $probeDirectory.Exists) {
+        Stop-Install "No existing parent directory is available: $Path"
+    }
+    $probe = Join-Path $probeDirectory.FullName (".roi-h-write-test-" + $PID)
+    try {
+        [IO.File]::WriteAllText($probe, "")
+    } catch [UnauthorizedAccessException] {
+        Stop-Install "The current user cannot write to: $Path"
+    } finally {
+        if (Test-Path -LiteralPath $probe -PathType Leaf) {
+            Remove-Item -Force -LiteralPath $probe
+        }
+    }
+}
+
+Assert-UserWritablePath -Path $installRoot
+Assert-UserWritablePath -Path $dataHome
 
 $temporaryRoot = Join-Path (
     [IO.Path]::GetTempPath()

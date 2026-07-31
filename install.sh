@@ -27,6 +27,10 @@ case "$platform" in
         ;;
 esac
 
+if [ "$(id -u)" -eq 0 ]; then
+    fail "Do not run the user installer as root or with sudo. Run it as the target user."
+fi
+
 case "$installer_version" in
     '' | *[!0-9A-Za-z.+-]*)
         fail "ROI_H_INSTALLER_VERSION is not a valid exact version."
