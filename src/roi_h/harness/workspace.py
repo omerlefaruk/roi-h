@@ -287,7 +287,7 @@ def init_project(
     project_root = _project_dir(base, selected)
     _assert_managed_project_root(base, project_root)
     if not project_root.is_dir():
-        msg = f"project not found: {selected!r}. Create it with: roi-h project create {selected}"
+        msg = f"project not found: {selected!r}. Create it with the project.create operation."
         raise FileNotFoundError(msg)
     _validate_project_manifest(project_root)
     _ensure_project_roots(project_root)
@@ -684,7 +684,7 @@ def _resolve_project(explicit: str | None, home_config_path: Path, home: Path) -
     if len(projects) == 1:
         return str(projects[0]["name"])
     if not projects:
-        msg = f"no projects under {home}. Create one with: roi-h project create NAME"
+        msg = f"no projects under {home}. Create one with the project.create operation."
         raise FileNotFoundError(msg)
     msg = (
         f"no active project in {home_config_path}. "

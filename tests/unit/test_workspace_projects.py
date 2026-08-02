@@ -84,6 +84,12 @@ def test_authoritative_and_runtime_remediation_use_catalog_operations(tmp_path: 
         Workspace.open(home)
     with pytest.raises(FileNotFoundError) as missing:
         Workspace.open(home, project="missing")
+    with pytest.raises(FileNotFoundError) as missing_init:
+        init_project(home, project="missing")
+
+    empty_home = tmp_path / "empty-home"
+    with pytest.raises(FileNotFoundError) as no_projects:
+        Workspace.open(empty_home)
 
     legacy = home / "projects" / "legacy"
     legacy.mkdir()
@@ -91,11 +97,20 @@ def test_authoritative_and_runtime_remediation_use_catalog_operations(tmp_path: 
     with pytest.raises(RuntimeError) as migration:
         Workspace.open(home, project="legacy")
 
-    messages = [str(no_active.value), str(missing.value), str(migration.value)]
+    messages = [
+        str(no_active.value),
+        str(missing.value),
+        str(missing_init.value),
+        str(no_projects.value),
+        str(migration.value),
+    ]
     docs = (Path(__file__).parents[2] / "docs" / "distribution-and-updates.md").read_text(
         encoding="utf-8"
     )
-    assert all("roi-h rpa" not in text for text in [*messages, docs])
+    assert all(
+        "roi-h rpa" not in text and "roi-h project" not in text
+        for text in [*messages, docs]
+    )
     operations = {item.operation_id for item in build_catalog().describe()}
     assert {"project.create", "project.use", "automation.source.put"} <= operations
 
@@ -145,7 +160,7 @@ def test_init_project_selects_existing_project_only(tmp_path: Path) -> None:
     assert get_active_project(home) == "beta"
     manifest = json.loads((home / "projects" / "beta" / "project.json").read_text())
     assert manifest["retention"]["log_retention"] == "30d"
-    with pytest.raises(FileNotFoundError, match=r"project create missing"):
+    with pytest.raises(FileNotFoundError, match=r"project\.create operation"):
         init_project(home, "missing")
 
 
