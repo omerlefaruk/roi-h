@@ -14,6 +14,8 @@ from roi_h.agent.catalog import OperationCatalog, OperationDefinition, build_cat
 from roi_h.agent.contract import CommandRequest, Effect, Idempotency, OperationManifest
 from roi_h.agent.dispatcher import Dispatcher
 from roi_h.agent.operation_models import InputArguments, OperationResult
+from roi_h.harness.automation_source import put_source, source_tree_digest
+from roi_h.harness.workspace import Workspace, create_project
 
 
 def test_public_operation_schemas_describe_required_arguments_and_results() -> None:
@@ -102,6 +104,68 @@ def test_dispatcher_rejects_missing_required_operation_arguments() -> None:
     assert result.error is not None
     assert result.error.code == "request.invalid"
     assert result.error.details["path"] == "arguments"
+
+
+def test_public_source_put_rejects_production_without_changing_source(tmp_path) -> None:
+    home = tmp_path / "home"
+    create_project(home, "demo", set_active=True)
+    dev = Workspace.open(home, project="demo", env="dev")
+    put_source(
+        dev.automation_sources,
+        "report",
+        {
+            "name": "report",
+            "phases": [
+                {"id": "build", "module": "build"},
+                {
+                    "id": "verify",
+                    "module": "verify",
+                    "role": "verify",
+                    "needs": ["build"],
+                },
+            ],
+        },
+        {
+            "build.py": "def run(context):\n    return {'summary': {'ok': True}}\n",
+            "verify.py": "def run(context):\n    return {'summary': {'ok': True}}\n",
+        },
+    )
+    before_digest, before_files = source_tree_digest(dev.automation_sources / "report")
+
+    result = Dispatcher().execute(
+        "automation.source.put",
+        CommandRequest(
+            idempotency_key="production-source",
+            arguments={
+                "home": str(home),
+                "project": "demo",
+                "environment": "prod",
+                "name": "report",
+                "manifest": {
+                    "name": "report",
+                    "phases": [
+                        {"id": "build", "module": "build"},
+                        {
+                            "id": "verify",
+                            "module": "verify",
+                            "role": "verify",
+                            "needs": ["build"],
+                        },
+                    ],
+                },
+                "files": {
+                    "build.py": "def run(context):\n    return {'summary': {'ok': True}}\n",
+                    "verify.py": "def run(context):\n    return {'summary': {'ok': True}}\n",
+                },
+            },
+        ),
+    )
+
+    after_digest, after_files = source_tree_digest(dev.automation_sources / "report")
+    assert result.ok is False
+    assert result.error is not None
+    assert result.error.message == "editable automation sources can change only in development"
+    assert (after_digest, after_files) == (before_digest, before_files)
 
 
 def test_idempotency_claim_blocks_concurrent_effects(tmp_path) -> None:

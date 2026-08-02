@@ -1,8 +1,8 @@
 # ROI-H Distribution and Updates
 
 This document is the authoritative contract for distributing and updating the ROI-H
-application. It does not define `roi-h rpa ship`, which publishes an automation inside an
-ROI-H project.
+application. It does not define the `automation.ship` operation, which publishes an automation
+inside an ROI-H project.
 
 ## Package identity
 

@@ -452,6 +452,9 @@ def automation_source_put(request: CommandRequest) -> dict[str, Any]:
         msg = "files must be an object of relative paths to text content"
         raise TypeError(msg)
     workspace = _workspace(request)
+    if workspace.env != "dev":
+        msg = "editable automation sources can change only in development"
+        raise ValueError(msg)
     snapshot = put_source(
         workspace.automation_sources,
         _name(request),

@@ -84,7 +84,7 @@ class Workspace:
         if not project_root.is_dir():
             msg = (
                 f"project {project_name!r} not found under {base / 'projects'}. "
-                "Create it with: roi-h rpa project create NAME"
+                "Create it with the project.create operation."
             )
             raise FileNotFoundError(msg)
 
@@ -95,7 +95,8 @@ class Workspace:
             if (project_root / "config.json").is_file():
                 msg = (
                     "project.layout_migration_required: version-3 project detected; "
-                    "run: roi-h rpa project migrate"
+                    "create a new current project with project.create, then recreate "
+                    "automation source with automation.source.put"
                 )
                 raise RuntimeError(msg)
             msg = f"project manifest missing: {project_config_path}"
@@ -687,7 +688,7 @@ def _resolve_project(explicit: str | None, home_config_path: Path, home: Path) -
         raise FileNotFoundError(msg)
     msg = (
         f"no active project in {home_config_path}. "
-        "Pass --project, set ROI_H_PROJECT, or: roi-h rpa project use NAME"
+        "Pass the project name, set ROI_H_PROJECT, or use project.use."
     )
     raise FileNotFoundError(msg)
 

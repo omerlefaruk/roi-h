@@ -11,6 +11,7 @@ from roi_h.harness.automation import load_automation
 from roi_h.harness.automation_source import put_source
 from roi_h.harness.journeys import run_automation, run_development_source, ship_automation
 from roi_h.harness.records import evidenced_artifacts
+from roi_h.harness.run_storage import RunStorage
 from roi_h.harness.workspace import Workspace, create_project
 
 
@@ -171,6 +172,50 @@ def test_run_id_cannot_be_reused(tmp_path: Path) -> None:
 
     runtime = ROIHRuntime.load(str(dev.db), run_id="one-run")
     assert len(list(runtime.graph.objects(type="rpa.run"))) == 1
+
+
+def test_input_preflight_failure_does_not_reserve_development_or_production_run(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / ".roi-h"
+    create_project(home, "demo", set_active=True)
+    dev = Workspace.open(home, project="demo", env="dev")
+    _put(dev)
+    input_file = tmp_path / "input.txt"
+    input_file.write_text("input", encoding="utf-8")
+    missing_file = tmp_path / "missing.txt"
+
+    with pytest.raises(FileNotFoundError, match="not a regular file"):
+        run_development_source(
+            dev,
+            name="report",
+            run_id="dev-input-retry",
+            inputs={"input.txt": str(missing_file)},
+        )
+    assert not RunStorage(dev).paths("dev-input-retry").root.exists()
+    assert run_development_source(
+        dev,
+        name="report",
+        run_id="dev-input-retry",
+        inputs={"input.txt": str(input_file)},
+    )["ok"]
+
+    ship_automation(dev, name="report", version="1.0.0", from_run="dev-input-retry")
+    prod = Workspace.open(home, project="demo", env="prod")
+    with pytest.raises(FileNotFoundError, match="not a regular file"):
+        run_automation(
+            prod,
+            name="report",
+            run_id="prod-input-retry",
+            inputs={"input.txt": str(missing_file)},
+        )
+    assert not RunStorage(prod).paths("prod-input-retry").root.exists()
+    assert run_automation(
+        prod,
+        name="report",
+        run_id="prod-input-retry",
+        inputs={"input.txt": str(input_file)},
+    )["ok"]
 
 
 def test_artifact_reads_verify_activegraph_evidence(tmp_path: Path) -> None:

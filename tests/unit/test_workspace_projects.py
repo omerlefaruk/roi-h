@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from roi_h.agent.catalog import build_catalog
 from roi_h.harness import workspace as workspace_module
 from roi_h.harness.lease import run_lease
 from roi_h.harness.workspace import (
@@ -68,6 +69,35 @@ def test_project_resolution_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert Workspace.open(home).project == "beta"
 
     assert Workspace.open(home, project="alpha").project == "alpha"
+
+
+def test_authoritative_and_runtime_remediation_use_catalog_operations(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    create_project(home, "first", set_active=True)
+    create_project(home, "second", set_active=False)
+    manifest = home / "config.json"
+    config = json.loads(manifest.read_text(encoding="utf-8"))
+    config.pop("active_project")
+    manifest.write_text(json.dumps(config), encoding="utf-8")
+
+    with pytest.raises(FileNotFoundError) as no_active:
+        Workspace.open(home)
+    with pytest.raises(FileNotFoundError) as missing:
+        Workspace.open(home, project="missing")
+
+    legacy = home / "projects" / "legacy"
+    legacy.mkdir()
+    (legacy / "config.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(RuntimeError) as migration:
+        Workspace.open(home, project="legacy")
+
+    messages = [str(no_active.value), str(missing.value), str(migration.value)]
+    docs = (Path(__file__).parents[2] / "docs" / "distribution-and-updates.md").read_text(
+        encoding="utf-8"
+    )
+    assert all("roi-h rpa" not in text for text in [*messages, docs])
+    operations = {item.operation_id for item in build_catalog().describe()}
+    assert {"project.create", "project.use", "automation.source.put"} <= operations
 
 
 def test_open_removes_legacy_adaptive_policy_from_all_environments(tmp_path: Path) -> None:

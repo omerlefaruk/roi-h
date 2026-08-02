@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import re
 import shutil
+import tempfile
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -51,9 +54,12 @@ def run_development_source(
     resolved_run_id = run_id or new_run_id(goal or name)
     validate_run_id(resolved_run_id)
     source_root = workspace.automation_sources / name
-    with run_lease(workspace, resolved_run_id):
+    with (
+        _staged_inputs(workspace, inputs or {}) as staged_inputs,
+        run_lease(workspace, resolved_run_id),
+    ):
         RunStorage(workspace).reserve(resolved_run_id)
-        _materialize_inputs(workspace, resolved_run_id, inputs or {})
+        _materialize_staged_inputs(workspace, resolved_run_id, staged_inputs)
         with source_lease(workspace.automation_sources, name):
             result = run_source(
                 workspace,
@@ -133,9 +139,12 @@ def run_automation(
     resolved_run_id = run_id or new_run_id(name)
     validate_run_id(resolved_run_id)
     manifest = package["manifest"]
-    with run_lease(workspace, resolved_run_id):
+    with (
+        _staged_inputs(workspace, inputs or {}) as staged_inputs,
+        run_lease(workspace, resolved_run_id),
+    ):
         RunStorage(workspace).reserve(resolved_run_id)
-        _materialize_inputs(workspace, resolved_run_id, inputs or {})
+        _materialize_staged_inputs(workspace, resolved_run_id, staged_inputs)
         result = run_source(
             workspace,
             package["source_root"],
@@ -199,12 +208,23 @@ def _public_result(result: dict[str, Any]) -> dict[str, Any]:
     return public
 
 
-def _materialize_inputs(
-    workspace: Workspace,
-    run_id: str,
+@contextmanager
+def _staged_inputs(workspace: Workspace, inputs: dict[str, str]) -> Iterator[Path]:
+    with tempfile.TemporaryDirectory(prefix=".inputs-", dir=workspace.runs) as directory:
+        root = Path(directory)
+        _copy_inputs(root, inputs)
+        yield root
+
+
+def _materialize_staged_inputs(workspace: Workspace, run_id: str, staged_inputs: Path) -> None:
+    target = RunStorage(workspace).paths(run_id).input
+    shutil.copytree(staged_inputs, target, dirs_exist_ok=True)
+
+
+def _copy_inputs(
+    root: Path,
     inputs: dict[str, str],
 ) -> None:
-    root = RunStorage(workspace).prepare(run_id).input.resolve()
     for raw_name, raw_source in inputs.items():
         relative = PurePosixPath(raw_name.replace("\\", "/"))
         if relative.is_absolute() or not relative.parts or ".." in relative.parts:
